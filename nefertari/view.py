@@ -62,7 +62,8 @@ class ViewMapper(object):
                 raise JHTTPNotFound()
 
             with trigger_events(view_obj):
-                return action(**matchdict)
+                view_obj._response = action(**matchdict)
+                return view_obj._response
 
         return view_mapper_wrapper
 
@@ -351,7 +352,7 @@ class BaseView(OptionsViewMixin):
                 return id_
 
             obj = model.get_item(
-                **{pk_field: id_, '__raise_on_empty': False})
+                **{pk_field: id_, '_raise_on_empty': False})
             if setdefault:
                 return obj or setdefault
             else:
