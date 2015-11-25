@@ -52,6 +52,7 @@ class TestViewMapper(object):
 
         class MyView(object):
             Model = Mock
+            _response = None
 
             def __init__(self, ctx, req):
                 self._before_calls = {'index': [bc1], 'show': [bc3]}
@@ -562,7 +563,7 @@ class TestBaseView(object):
         assert view._json_params['user'] == 'foo'
         model.pk_field.assert_called_once_with()
         model.get_item.assert_called_once_with(
-            idname='1', __raise_on_empty=False)
+            idname='1', _raise_on_empty=False)
 
     @patch('nefertari.view.BaseView._run_init_actions')
     def test_id2obj_list(self, run):
@@ -578,7 +579,7 @@ class TestBaseView(object):
         assert view._json_params['user'] == ['foo']
         model.pk_field.assert_called_once_with()
         model.get_item.assert_called_once_with(
-            idname='1', __raise_on_empty=False)
+            idname='1', _raise_on_empty=False)
 
     @patch('nefertari.view.BaseView._run_init_actions')
     def test_id2obj_not_in_params(self, run):
@@ -605,7 +606,7 @@ class TestBaseView(object):
         assert view._json_params['user'] == 123
         model.pk_field.assert_called_once_with()
         model.get_item.assert_called_once_with(
-            idname='1', __raise_on_empty=False)
+            idname='1', _raise_on_empty=False)
 
     @patch('nefertari.view.BaseView._run_init_actions')
     def test_id2obj_value_none(self, run):
