@@ -626,8 +626,15 @@ class ES(object):
     def index_relations(cls, db_obj, request=None, **kwargs):
         for model_cls, documents in db_obj.get_related_documents(**kwargs):
             if getattr(model_cls, '_index_enabled', False) and documents:
+                children_to_index = []
+
+                for child in documents:
+                    pk_name = child.pk_field()
+                    if getattr(child, pk_name) is not None:
+                        children_to_index.append(child)
+
                 cls(model_cls.__name__).index(
-                    to_dicts(documents), request=request)
+                    to_dicts(children_to_index), request=request)
 
     @classmethod
     def bulk_index_relations(cls, items, request=None, **kwargs):
