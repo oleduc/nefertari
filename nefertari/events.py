@@ -298,7 +298,8 @@ def trigger_events(view_obj):
         }
         ctx = view_obj.context
 
-        if hasattr(ctx, 'pk_field') or isinstance(ctx, DataProxy) or isinstance(ctx, view_obj.Model):
+        if hasattr(ctx, 'pk_field') or isinstance(ctx, DataProxy) or \
+                (type(view_obj.Model) is object and isinstance(ctx, view_obj.Model)):
             event_kwargs['instance'] = ctx
 
         before_event = BEFORE_EVENTS[event_action]
