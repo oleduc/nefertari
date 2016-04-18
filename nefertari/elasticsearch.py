@@ -6,6 +6,7 @@ from collections import defaultdict
 
 import elasticsearch
 from elasticsearch import helpers
+import os
 import six
 
 from nefertari.utils import (
@@ -66,8 +67,17 @@ class ESHttpConnection(elasticsearch.Urllib3HttpConnection):
 def includeme(config):
     Settings = dictset(config.registry.settings)
     ES.setup(Settings)
-    ES.create_index()
 
+    # Load custom index settings
+    index_settings = None
+    if os.path.exists("index_settings.json"):
+        with open("index_settings.json") as data_file:
+            try:
+                index_settings = json.load(data_file)
+            except:
+                raise Exception("Could not parse analyser {analyser_name}".format(analyser_name=file_name))
+
+    ES.create_index(index_settings=index_settings)
     if ES.settings.asbool('enable_polymorphic_query'):
         config.include('nefertari.polymorphic')
 
@@ -180,7 +190,7 @@ class ES(object):
             _hosts = cls.settings.hosts
             hosts = []
             for (host, port) in [
-                    split_strip(each, ':') for each in split_strip(_hosts)]:
+                split_strip(each, ':') for each in split_strip(_hosts)]:
                 hosts.append(dict(host=host, port=port))
 
             params = {}
@@ -207,12 +217,17 @@ class ES(object):
         self.chunk_size = chunk_size
 
     @classmethod
-    def create_index(cls, index_name=None):
+    def create_index(cls, index_name=None, index_settings=None):
         index_name = index_name or cls.settings.index_name
         try:
             cls.api.indices.exists([index_name])
         except (IndexNotFoundException, JHTTPNotFound):
-            cls.api.indices.create(index_name)
+            cls.api.indices.create(
+                index=index_name,
+                body={
+                    'settings': index_settings
+                }
+            )
 
     @classmethod
     def setup_mappings(cls, force=False):
