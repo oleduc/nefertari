@@ -88,7 +88,9 @@ def includeme(config):
             try:
                 index_settings = json.load(data_file)
             except:
-                raise Exception("Could not parse index settings (index_settings.json)")
+                raise Exception("Could not parse custom index settings : '{file_name}'".format(
+                    file_name=index_settings_path
+                ))
 
     ES.create_index(index_settings=index_settings)
     if ES.settings.asbool('enable_polymorphic_query'):
