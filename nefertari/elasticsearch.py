@@ -70,14 +70,27 @@ def includeme(config):
 
     # Load custom index settings
     index_settings = None
-    
-    if os.path.exists("index_settings.json"):
-        with open("index_settings.json") as data_file:
+    index_settings_path = None
+
+    if "elasticsearch.index.settings_file" in Settings:
+        index_settings_path = Settings["elasticsearch.index.settings_file"]
+
+        if not os.path.exists(index_settings_path):
+            raise Exception("Custom index settings file does not exist : '{file_name}'".format(
+                file_name=index_settings_path
+            ))
+    else:
+        if os.path.exists("index_settings.json"):
+            index_settings_path = "index_settings.json"
+
+    if index_settings_path is not None:
+        with open(index_settings_path) as data_file:
             try:
                 index_settings = json.load(data_file)
             except:
-                raise Exception("Could not parse index settings (index_settings.json)")
-        
+                raise Exception("Could not parse custom index settings : '{file_name}'".format(
+                    file_name=index_settings_path
+                ))
 
     ES.create_index(index_settings=index_settings)
     if ES.settings.asbool('enable_polymorphic_query'):
