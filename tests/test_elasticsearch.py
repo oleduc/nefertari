@@ -284,10 +284,10 @@ class TestES(object):
             es._bulk_body, request=None)
         mock_proc.assert_called_once_with(
             documents=[{
-                '_id': 'story1', '_op_type': 'index', '_timestamp': 1,
+                '_id': 'story1', '_op_type': 'index',
                 '_source': {'timestamp': 1, '_type': 'Story', 'id': 'story1'}
             }, {
-                '_id': 'story2', '_op_type': 'index', '_timestamp': 2,
+                '_id': 'story2', '_op_type': 'index',
                 '_source': {'timestamp': 2, '_type': 'Story', 'id': 'story2'}
             }],
             operation=mock_part(),
@@ -624,7 +624,6 @@ class TestES(object):
         assert resp == {'foo': 1}
         mock_build.assert_called_once_with({'_limit': 0, 'param1': 6})
         mock_search.assert_called_once_with(
-            search_type='count',
             body={'aggregations': {'zoo': 5}, 'query': 'query1'},
         )
 
@@ -664,14 +663,13 @@ class TestES(object):
         mock_count.assert_called_once_with({'foo': 'bar'})
         mock_build.assert_called_once_with({'_count': True, 'foo': 1})
 
-    @patch('nefertari.elasticsearch.ES.build_search_params')
     @patch('nefertari.elasticsearch.ES.do_count')
-    def test_get_collection_count_with_body(self, mock_count, mock_build):
+    def test_get_collection_count_with_body(self, mock_count):
         obj = es.ES('Foo', 'foondex')
         obj.get_collection(_count=True, foo=1, body={'foo': 'bar'})
-        mock_count.assert_called_once_with(
-            {'body': {'foo': 'bar'}, '_count': True, 'foo': 1})
-        assert not mock_build.called
+        mock_count.assert_called_once_with({
+            'body': {'foo': 'bar'}, 'doc_type': 'Foo',
+            'from_': 0, 'size': 1, 'index': 'foondex'})
 
     @patch('nefertari.elasticsearch.ES.api.search')
     def test_get_collection_fields(self, mock_search):
@@ -685,10 +683,11 @@ class TestES(object):
             'took': 2.8,
         }
         docs = obj.get_collection(
-            fields=['foo'], body={'foo': 'bar'}, from_=0)
+            _fields=['foo'], body={'foo': 'bar'}, from_=0)
         mock_search.assert_called_once_with(
-            body={'foo': 'bar'}, _source_include=['foo', '_type'],
-            from_=0, _source=True)
+            body={'foo': 'bar'}, doc_type='Foo', index='foondex',
+            _source_include=['foo', '_type'], _source=True,
+            from_=0, size=1)
         assert len(docs) == 1
         assert docs[0].id == 1
         assert docs[0]._score == 2
@@ -714,7 +713,9 @@ class TestES(object):
             'took': 2.8,
         }
         docs = obj.get_collection(body={'foo': 'bar'}, from_=0)
-        mock_search.assert_called_once_with(body={'foo': 'bar'}, from_=0)
+        mock_search.assert_called_once_with(
+            body={'foo': 'bar'}, doc_type='Foo', from_=0, size=1,
+            index='foondex')
         assert len(docs) == 1
         assert docs[0].id == 1
         assert docs[0]._score == 2
