@@ -357,7 +357,7 @@ class ES(object):
         elif isinstance(documents, set):
             self.index_documents(list(documents), request=request)
         elif engine.is_object_document(documents):
-            self.index_document(documents, request=request)
+            self._bulk('index', documents.to_indexable_dict(), request)
         else:
             raise TypeError(
                 'Documents type must be `list`,`set` or `BaseDocument` not a `{}`'.format(
@@ -365,14 +365,12 @@ class ES(object):
 
     def index_document(self, document, request=None):
         if engine.is_object_document(document):
-            dict = document.to_indexable_dict()
+            """ Reindex all `document`s. """
+            self._bulk('index', document.to_indexable_dict(), request)
         else:
             raise TypeError(
                 'Document type must be an instance of a type extending `BaseDocument` not a `{}`'.format(
                     type(document).__name__))
-
-        """ Reindex all `document`s. """
-        self._bulk('index', dict, request)
 
     def index_documents(self, documents, request=None):
         dict_documents = []

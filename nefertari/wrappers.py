@@ -84,7 +84,7 @@ class obj2dict(object):
         if hasattr(result, '_nefertari_meta'):
             _fields = result._nefertari_meta.get('fields', [])
 
-        if hasattr(result, "to_dict"):
+        if hasattr(result, "to_presentable_dict"):
             return result.to_presentable_dict(_keys=_fields, request=self.request)
 
         elif issequence(result):

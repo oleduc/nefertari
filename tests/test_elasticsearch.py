@@ -11,7 +11,6 @@ from nefertari.utils import dictset
 
 
 class TestESHttpConnection(object):
-
     @patch('nefertari.elasticsearch.ESHttpConnection._catch_index_error')
     @patch('nefertari.elasticsearch.log')
     def test_perform_request_debug(self, mock_log, mock_catch):
@@ -23,7 +22,7 @@ class TestESHttpConnection(object):
         conn.perform_request('POST', 'http://localhost:9200')
         mock_log.debug.assert_called_once_with(
             "('POST', 'http://localhost:9200')")
-        conn.perform_request('POST', 'http://localhost:9200'*200)
+        conn.perform_request('POST', 'http://localhost:9200' * 200)
         assert mock_catch.called
         assert mock_log.debug.call_count == 2
 
@@ -156,7 +155,6 @@ class TestHelperFunctions(object):
 
 
 class TestES(object):
-
     @patch('nefertari.elasticsearch.ES.settings')
     def test_init(self, mock_set):
         obj = es.ES(source='Foo')
@@ -302,11 +300,60 @@ class TestES(object):
         mock_prep.assert_called_once_with('myaction', ['a'])
         assert not mock_proc.called
 
+    @patch('nefertari.elasticsearch.engine')
+    @patch('nefertari.elasticsearch.ES.index_documents')
+    @patch('nefertari.elasticsearch.ES.index_document')
     @patch('nefertari.elasticsearch.ES._bulk')
-    def test_index(self, mock_bulk):
+    def test_index(self, mock_bulk, mock_index_document, mock_index_documents, mock_engine):
         obj = es.ES('Foo', 'foondex', chunk_size=4)
-        obj.index(['a'])
-        mock_bulk.assert_called_once_with('index', ['a'], None)
+
+        # Indexing a list
+        obj.index(['a'], request={"test": "test"})
+        mock_index_documents.assert_called_once_with(['a'], request={"test": "test"})
+
+        # Indexing a set
+        obj.index({'a'}, request={"test": "test"})
+        mock_index_documents.assert_called_with(['a'], request={"test": "test"})
+        mock_engine.is_object_document = Mock(return_value=True)
+
+        # Indexing a document
+        fake_document = Mock()
+        fake_document.to_indexable_dict = Mock(return_value={"a": "b"})
+        obj.index(fake_document, request=None)
+        mock_bulk.assert_called_once_with("index", {"a": "b"}, None)
+
+    @patch('nefertari.elasticsearch.engine')
+    @patch('nefertari.elasticsearch.ES._bulk')
+    def test_index_document(self, mock_bulk, mock_engine):
+        obj = es.ES('Foo', 'foondex', chunk_size=4)
+
+        fake_document = Mock()
+        fake_document.to_indexable_dict = Mock(return_value={"a": "b"})
+        mock_engine.is_object_document = Mock(return_value=True)
+        obj.index_document(fake_document, request=None)
+        mock_bulk.assert_called_once_with("index", {"a": "b"}, None)
+
+        mock_engine.is_object_document = Mock(return_value=False)
+
+        with pytest.raises(TypeError):
+            obj.index_document("a")
+
+    @patch('nefertari.elasticsearch.engine')
+    @patch('nefertari.elasticsearch.ES._bulk')
+    def test_index_documents(self, mock_bulk, mock_engine):
+        obj = es.ES('Foo', 'foondex', chunk_size=4)
+
+        fake_document = Mock()
+        fake_document.to_indexable_dict = Mock(return_value={"a": "b"})
+        mock_engine.is_object_document = Mock(return_value=True)
+
+        obj.index_documents([fake_document, fake_document], request=None)
+        mock_bulk.assert_called_once_with("index", [{"a": "b"}, {"a": "b"}], None)
+
+        mock_engine.is_object_document = Mock(return_value=False)
+
+        with pytest.raises(TypeError):
+            obj.index_documents([fake_document, fake_document])
 
     @patch('nefertari.elasticsearch.ES._bulk')
     def test_delete(self, mock_bulk):
@@ -825,7 +872,7 @@ class TestES(object):
             raise Exception('Unexpected error')
 
     @patch('nefertari.elasticsearch.ES.settings')
-    @patch('nefertari.elasticsearch.ES.index')
+    @patch('nefertari.elasticsearch.ES.index_documents')
     def test_index_relations(self, mock_ind, mock_settings):
         class Foo(object):
             id = None
@@ -856,7 +903,7 @@ class TestES(object):
         assert not mock_ind.called
 
     @patch('nefertari.elasticsearch.ES.settings')
-    @patch('nefertari.elasticsearch.ES.index')
+    @patch('nefertari.elasticsearch.ES.index_documents')
     def test_bulk_index_relations(self, mock_index, mock_settings):
         mock_settings.index_name = 'foo'
 
@@ -874,4 +921,4 @@ class TestES(object):
             (Foo, [doc2])]
 
         es.ES.bulk_index_relations([db_object1, db_object2])
-        mock_index.assert_called_once_with(sorted([doc1, doc2]), request=None)
+        mock_index.assert_called_once_with({doc1, doc2}, request=None)
