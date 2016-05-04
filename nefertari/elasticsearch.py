@@ -107,8 +107,10 @@ def _bulk_body(documents_actions, request):
         query_params = {}
     else:
         query_params = request.params.mixed()
+
     query_params = dictset(query_params)
     refresh_enabled = ES.settings.asbool('enable_refresh_query')
+
     if '_refresh_index' in query_params and refresh_enabled:
         kwargs['refresh'] = query_params.asbool('_refresh_index')
 
@@ -350,8 +352,40 @@ class ES(object):
             log.warning('Empty body')
 
     def index(self, documents, request=None, **kwargs):
+        if isinstance(documents, list):
+            self.index_documents(documents, request=request)
+        elif isinstance(documents, set):
+            self.index_documents(list(documents), request=request)
+        elif engine.is_object_document(documents):
+            self.index_document(documents, request=request)
+        else:
+            raise TypeError(
+                'Documents type must be `list`,`set` or `BaseDocument` not a `{}`'.format(
+                    type(documents).__name__))
+
+    def index_document(self, document, request=None):
+        if engine.is_object_document(document):
+            dict = document.to_indexable_dict()
+        else:
+            raise TypeError(
+                'Document type must be an instance of a type extending `BaseDocument` not a `{}`'.format(
+                    type(document).__name__))
+
         """ Reindex all `document`s. """
-        self._bulk('index', documents, request)
+        self._bulk('index', dict, request)
+
+    def index_documents(self, documents, request=None):
+        dict_documents = []
+
+        for document in documents:
+            if engine.is_object_document(document):
+                dict_documents.append(document.to_indexable_dict())
+            else:
+                raise TypeError("nefertari.elasticsearch.index_documents takes a list of documents extending "
+                                "BaseDocument")
+
+        """ Reindex all `document`s. """
+        self._bulk('index', dict_documents, request)
 
     def index_missing_documents(self, documents, request=None):
         """ Index documents that are missing from ES index.
@@ -362,6 +396,7 @@ class ES(object):
         """
         log.info('Trying to index documents of type `{}` missing from '
                  '`{}` index'.format(self.doc_type, self.index_name))
+
         if not documents:
             log.info('No documents to index')
             return
@@ -650,21 +685,19 @@ class ES(object):
                     if getattr(child, pk_name) is not None:
                         children_to_index.append(child)
 
-                cls(model_cls.__name__).index(
-                    to_dicts(children_to_index), request=request)
+                cls(model_cls.__name__).index_documents(children_to_index, request=request)
 
     @classmethod
     def bulk_index_relations(cls, items, request=None, **kwargs):
         """ Index objects related to :items: in bulk.
-
         Related items are first grouped in map
         {model_name: {item1, item2, ...}} and then indexed.
-
         :param items: Sequence of DB objects related objects if which
             should be indexed.
         :param request: Pyramid Request instance.
         """
         index_map = defaultdict(set)
+
         for item in items:
             relations = item.get_related_documents(**kwargs)
             for model_cls, related_items in relations:
@@ -673,4 +706,4 @@ class ES(object):
                     index_map[model_cls.__name__].update(related_items)
 
         for model_name, instances in index_map.items():
-            cls(model_name).index(to_dicts(instances), request=request)
+            cls(model_name).index_documents(instances, request=request)

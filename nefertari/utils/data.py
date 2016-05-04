@@ -4,8 +4,37 @@ from nefertari.utils.utils import issequence
 
 
 class DataProxy(object):
-    def __init__(self, data={}):
+    def __init__(self, data=None):
+        if data is None:
+            data = {}
+        self._substituted = []
         self._data = dictset(data)
+
+    def __setattr__(self, name, value):
+        """
+        Override __setattr__ to replace nested attributes with their backrefs.
+        Since we can't have multiple fields with the same names and different mappings and that nested and non nested
+        backrefs might have the same name but different mappins, we expand the nested backrefs into:
+        Type.backref_name = {type:long}
+        Type.backref_name_nested = {*object properties*}
+        Which means that objects that are being read from ES need to have backref_name replaced with backref_name_nested
+        This is where we do this operation as it is the common denominator of all indexed objects.
+        :param name:
+        :param value:
+        """
+        if not hasattr(self, name):
+            if name.endswith("_nested"):
+                name = name.replace("_nested", "")
+                self._data[name] = value
+                self._substituted.append(name)
+
+            super(DataProxy, self).__setattr__(name, value)
+        else:
+            if type(self._substituted) is list and len(self._substituted) > 0:
+                if name not in self._substituted:
+                    super(DataProxy, self).__setattr__(name, value)
+            else:
+                super(DataProxy, self).__setattr__(name, value)
 
     def to_dict(self, **kwargs):
         _dict = dictset()
@@ -26,6 +55,7 @@ class DataProxy(object):
                     _dict[attr] = to_dicts(val, **kw)
 
         _dict['_type'] = self.__class__.__name__
+
         return _dict
 
 
@@ -33,21 +63,33 @@ def dict2obj(data):
     if not data:
         return data
 
+    # Here we create a dynamic type of DataProxy, with the same name as document type.
+    # Todo: Create all known proxies on application start
+    # Todo: Make it more consistent with real document instances.
     _type = str(data.get('_type'))
-    top = type(_type, (DataProxy,), {})(data)
+    top = type(_type, (DataProxy,), {
+        "__init__": DataProxy.__init__,
+        "__setattr__": DataProxy.__setattr__,
+        "_substituted": None,
+        "_data": None,
+        "to_dict": DataProxy.to_dict,
+        "to_presentable_dict": DataProxy.to_dict
+    })
 
-    for key, val in top._data.items():
+    proxy = top(data)
+
+    for key, val in proxy._data.items():
         key = str(key)
         if isinstance(val, dict):
-            setattr(top, key, dict2obj(val))
+            setattr(proxy, key, dict2obj(val))
         elif isinstance(val, list):
             setattr(
-                top, key,
+                proxy, key,
                 [dict2obj(sj) if isinstance(sj, dict) else sj for sj in val])
         else:
-            setattr(top, key, val)
+            setattr(proxy, key, val)
 
-    return top
+    return proxy
 
 
 def to_objs(collection):
