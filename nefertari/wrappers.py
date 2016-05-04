@@ -68,7 +68,7 @@ class obj2dict(object):
     """ Convert object to dictionary.
 
     Sequence of objects is converted to sequence of dicts.
-    Conversion is performed by calling object's 'to_dict' method.
+    Conversion is performed by calling object's 'to_presentable_dict' method.
     """
     def __init__(self, request):
         self.request = request
