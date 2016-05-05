@@ -64,19 +64,19 @@ class TestWrappers(unittest.TestCase):
 
     def test_obj2dict_regular(self):
         result = Mock()
-        result.to_presentable_dict.return_value = {'a': 1}
+        result.to_dict.return_value = {'a': 1}
         assert wrappers.obj2dict(None)(result=result) == {'a': 1}
 
     def test_obj2dict_list_from_todict(self):
         result = Mock()
-        result.to_presentable_dict.return_value = [dict(a=1), dict(b=2)]
+        result.to_dict.return_value = [dict(a=1), dict(b=2)]
         self.assertEqual(
             [dict(a=1), dict(b=2)],
             wrappers.obj2dict(request=None)(result=result))
 
     def test_obj2dict_nested(self):
         special = Mock()
-        special.to_presentable_dict.return_value = {'special': 'dict'}
+        special.to_dict.return_value = {'special': 'dict'}
         result = [special]
         self.assertEqual(
             [{'special': 'dict'}],

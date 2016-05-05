@@ -72,8 +72,7 @@ def dict2obj(data):
         "__setattr__": DataProxy.__setattr__,
         "_substituted": None,
         "_data": None,
-        "to_dict": DataProxy.to_dict,
-        "to_presentable_dict": DataProxy.to_dict
+        "to_dict": DataProxy.to_dict
     })
 
     proxy = top(data)

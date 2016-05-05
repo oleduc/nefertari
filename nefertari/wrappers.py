@@ -68,7 +68,7 @@ class obj2dict(object):
     """ Convert object to dictionary.
 
     Sequence of objects is converted to sequence of dicts.
-    Conversion is performed by calling object's 'to_presentable_dict' method.
+    Conversion is performed by calling object's 'to_dict' method.
     """
     def __init__(self, request):
         self.request = request
@@ -84,8 +84,8 @@ class obj2dict(object):
         if hasattr(result, '_nefertari_meta'):
             _fields = result._nefertari_meta.get('fields', [])
 
-        if hasattr(result, "to_presentable_dict"):
-            return result.to_presentable_dict(_keys=_fields, request=self.request)
+        if hasattr(result, "to_dict"):
+            return result.to_dict(_keys=_fields, request=self.request)
 
         elif issequence(result):
             # make sure its mutable, i.e list
