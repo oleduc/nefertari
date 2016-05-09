@@ -10,7 +10,7 @@ import os
 import six
 
 from nefertari.utils import (
-    dictset, dict2obj, process_limit, split_strip, to_dicts)
+    dictset, dict2proxy, process_limit, split_strip, to_dicts, DataProxy)
 from nefertari.json_httpexceptions import (
     JHTTPBadRequest, JHTTPNotFound, exception_response)
 from nefertari import engine, RESERVED_PARAMS
@@ -192,6 +192,7 @@ class _ESDocs(list):
 class ES(object):
     api = None
     settings = None
+    document_proxies = None
 
     @classmethod
     def src2type(cls, source):
@@ -202,6 +203,7 @@ class ES(object):
     def setup(cls, settings):
         cls.settings = settings.mget('elasticsearch')
         cls.settings.setdefault('chunk_size', 500)
+        cls.document_proxies = {}
 
         try:
             _hosts = cls.settings.hosts
@@ -228,6 +230,7 @@ class ES(object):
 
     def __init__(self, source='', index_name=None, chunk_size=None):
         self.doc_type = self.src2type(source)
+        self.proxy = ES.document_proxies[self.doc_type]
         self.index_name = index_name or self.settings.index_name
         if chunk_size is None:
             chunk_size = self.settings.asint('chunk_size')
@@ -272,14 +275,31 @@ class ES(object):
             return
         log.info('Setting up ES mappings for all existing models')
         models = engine.get_document_classes()
+
         try:
             for model_name, model_cls in models.items():
                 if getattr(model_cls, '_index_enabled', False):
+                    mapping, substitutions = model_cls.get_es_mapping()
+                    cls.setup_document_proxy(model_cls.__name__, substitutions)
+
                     es = cls(model_cls.__name__)
-                    es.put_mapping(body=model_cls.get_es_mapping())
+                    es.put_mapping(body=mapping)
         except JHTTPBadRequest as ex:
             raise Exception(ex.json['extra']['data'])
+
         cls._mappings_setup = True
+
+    @classmethod
+    def setup_document_proxy(cls, type_name, substitutions):
+        cls.document_proxies[type_name] = type(type_name, (DataProxy,), {
+            "__init__": DataProxy.__init__,
+            "__setattr__": DataProxy.__setattr__,
+            "substitutions": None,
+            "to_dict": DataProxy.to_dict
+        })
+
+        if len(substitutions) > 0:
+            cls.document_proxies[type_name].substitutions = substitutions
 
     def put_mapping(self, body, **kwargs):
         self.api.indices.put_mapping(
@@ -485,7 +505,7 @@ class ES(object):
                     log.error(msg)
                     continue
 
-            documents.append(dict2obj(dictset(output_doc)))
+            documents.append(dict2proxy(dictset(output_doc), ES.document_proxies[found_doc['_type']]))
 
         documents._nefertari_meta.update(
             total=len(documents),
@@ -530,6 +550,14 @@ class ES(object):
 
         if '_fields' in params:
             _params['fields'] = params['_fields']
+            terms = params['_fields'].split(',')
+            nested_fields = []
+
+            for term in terms:
+                if term in self.proxy.substitutions:
+                    nested_fields.append(term + "_nested")
+
+            _params['fields'] = ",".join(terms + nested_fields)
 
         if '_search_fields' in params:
             search_fields = params['_search_fields'].split(',')
@@ -624,7 +652,7 @@ class ES(object):
             output_doc = found_doc['_source']
             output_doc['_score'] = found_doc['_score']
             output_doc['_type'] = found_doc['_type']
-            documents.append(dict2obj(output_doc))
+            documents.append(dict2proxy(output_doc, self.proxy))
 
         documents._nefertari_meta.update(
             total=data['hits']['total'],
@@ -670,7 +698,7 @@ class ES(object):
         if '_type' not in data:
             data['_type'] = self.doc_type
 
-        return dict2obj(data)
+        return dict2proxy(data, self.proxy)
 
     @classmethod
     def index_relations(cls, db_obj, request=None, **kwargs):

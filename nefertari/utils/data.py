@@ -5,10 +5,9 @@ from nefertari.utils.utils import issequence
 
 class DataProxy(object):
     def __init__(self, data=None):
-        if data is None:
-            data = {}
+        self._data = {}
+        self.data = data or {}
         self._substituted = []
-        self._data = dictset(data)
 
     def __setattr__(self, name, value):
         """
@@ -22,19 +21,16 @@ class DataProxy(object):
         :param name:
         :param value:
         """
-        if not hasattr(self, name):
-            if name.endswith("_nested"):
-                name = name.replace("_nested", "")
-                self._data[name] = value
+
+        if not name.endswith("_nested"):
+            if self.substitutions is not None and name in self.substitutions:
                 self._substituted.append(name)
+                value = self.data[name + "_nested"]
+
+            if name != "_data":
+                self._data[name] = value
 
             super(DataProxy, self).__setattr__(name, value)
-        else:
-            if type(self._substituted) is list and len(self._substituted) > 0:
-                if name not in self._substituted:
-                    super(DataProxy, self).__setattr__(name, value)
-            else:
-                super(DataProxy, self).__setattr__(name, value)
 
     def to_dict(self, **kwargs):
         _dict = dictset()
@@ -59,25 +55,24 @@ class DataProxy(object):
         return _dict
 
 
-def dict2obj(data):
+def dict2obj(data, proxy_cls=None):
     if not data:
         return data
 
     # Here we create a dynamic type of DataProxy, with the same name as document type.
-    # Todo: Create all known proxies on application start
     # Todo: Make it more consistent with real document instances.
-    _type = str(data.get('_type'))
-    top = type(_type, (DataProxy,), {
-        "__init__": DataProxy.__init__,
-        "__setattr__": DataProxy.__setattr__,
-        "_substituted": None,
-        "_data": None,
-        "to_dict": DataProxy.to_dict
-    })
+    if proxy_cls is None:
+        _type = str(data.get('_type'))
+        proxy_cls = type(_type, (DataProxy,), {
+            "__init__": DataProxy.__init__,
+            "__setattr__": DataProxy.__setattr__,
+            "substitutions": None,
+            "to_dict": DataProxy.to_dict
+        })
 
-    proxy = top(data)
+    proxy = proxy_cls(data)
 
-    for key, val in proxy._data.items():
+    for key, val in proxy.data.items():
         key = str(key)
         if isinstance(val, dict):
             setattr(proxy, key, dict2obj(val))
@@ -89,6 +84,10 @@ def dict2obj(data):
             setattr(proxy, key, val)
 
     return proxy
+
+
+def dict2proxy(data, proxy):
+    return dict2obj(data, proxy)
 
 
 def to_objs(collection):
