@@ -272,7 +272,7 @@ class ES(object):
         cls.document_proxies[type_name] = type(type_name, (DataProxy,), {
             "__init__": DataProxy.__init__,
             "__setattr__": DataProxy.__setattr__,
-            "substitutions": None,
+            "substitutions": list(),
             "to_dict": DataProxy.to_dict
         })
 
@@ -594,6 +594,7 @@ class ES(object):
                 search_fields[index] = search_field + '^' + str(index + 1)
 
             current_qs = _params['body']['query']['query_string']
+
             if isinstance(current_qs, str):
                 _params['body']['query']['query_string'] = {'query': current_qs}
             _params['body']['query']['query_string']['fields'] = search_fields
@@ -726,8 +727,8 @@ class ES(object):
 
         if '_type' not in data:
             data['_type'] = self.doc_type
-
-        return dict2proxy(data, self.proxy)
+        wtf = dict2proxy(data, self.proxy)
+        return wtf
 
     @classmethod
     def index_relations(cls, db_obj, request=None, **kwargs):

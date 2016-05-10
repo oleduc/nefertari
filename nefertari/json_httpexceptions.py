@@ -23,7 +23,7 @@ BASE_ATTRS = ['status_code', 'explanation', 'message', 'title']
 
 
 def add_stack():
-    return ''.join(traceback.format_stack())
+    return ''.join(traceback.format_exc())
 
 
 def create_json_response(obj, request=None, log_it=False, show_stack=False,
@@ -55,7 +55,7 @@ def create_json_response(obj, request=None, log_it=False, show_stack=False,
     if 400 <= status < 600 and status not in BLACKLIST_LOG or log_it:
         msg = '%s: %s' % (obj.status.upper(), obj.body)
         if obj.status_int in [400, 500] or show_stack:
-            msg += '\nSTACK BEGIN>>\n%s\nSTACK END<<' % add_stack()
+            msg += '\nSTACK TRACE BEGIN>>\n%s\nSTACK END<<' % add_stack()
 
         logger.error(msg)
 
