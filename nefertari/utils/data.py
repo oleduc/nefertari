@@ -4,9 +4,13 @@ from nefertari.utils.utils import issequence
 
 
 class DataProxy(object):
+    _data = None
+    _raw_data = None
+    _substituted = None
+
     def __init__(self, data=None):
         self._data = {}
-        self.data = data or {}
+        self._raw_data = data or {}
         self._substituted = []
 
     def __setattr__(self, name, value):
@@ -25,9 +29,9 @@ class DataProxy(object):
         if not name.endswith("_nested"):
             if self.substitutions is not None and name in self.substitutions:
                 self._substituted.append(name)
-                value = self.data[name + "_nested"]
+                value = self._raw_data[name + "_nested"]
 
-            if name != "_data":
+            if not hasattr(self.__class__, name):
                 self._data[name] = value
 
             super(DataProxy, self).__setattr__(name, value)
@@ -41,6 +45,7 @@ class DataProxy(object):
 
         for attr, val in data.items():
             _dict[attr] = val
+
             if _depth:
                 kw = kwargs.copy()
                 kw['_depth'] = _depth - 1
@@ -72,7 +77,7 @@ def dict2obj(data, proxy_cls=None):
 
     proxy = proxy_cls(data)
 
-    for key, val in proxy.data.items():
+    for key, val in proxy._raw_data.items():
         key = str(key)
         if isinstance(val, dict):
             setattr(proxy, key, dict2obj(val))

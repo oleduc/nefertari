@@ -160,28 +160,6 @@ def build_terms(name, values, operator='OR'):
     return (' %s ' % operator).join(['%s:%s' % (name, v) for v in values])
 
 
-def build_qs(params, _raw_terms='', operator='AND'):
-    # if param is _all then remove it
-    params.pop_by_values('_all')
-
-    terms = []
-
-    for k, v in params.items():
-        if k.startswith('__'):
-            continue
-        if type(v) is list:
-            terms.append(build_terms(k, v))
-        else:
-            terms.append('%s:%s' % (k, v))
-
-    terms = sorted([term for term in terms if term])
-    _terms = (' %s ' % operator).join(terms)
-    if _raw_terms:
-        add = (' AND ' + _raw_terms) if _terms else _raw_terms
-        _terms += add
-    return _terms
-
-
 class _ESDocs(list):
     def __init__(self, *args, **kw):
         self._total = 0
@@ -327,6 +305,38 @@ class ES(object):
 
             start += chunk_size
             count -= chunk_size
+
+    def build_qs(self, params, _raw_terms='', operator='AND'):
+        # if param is _all then remove it
+        params.pop_by_values('_all')
+
+        terms = []
+
+        for k, v in params.items():
+            if k.startswith('__'):
+                continue
+
+            key = k
+
+            # Substitute nested key names
+            if '.' in key:
+                key_terms = key.split('.')
+
+                if len(key_terms) >= 1 and key_terms[0] in self.proxy.substitutions:
+                    key_terms[0] += "_nested"
+                    key = '.'.join(key_terms)
+
+            if type(v) is list:
+                terms.append(build_terms(key, v))
+            else:
+                terms.append('%s:%s' % (key, v))
+
+        terms = sorted([term for term in terms if term])
+        _terms = (' %s ' % operator).join(terms)
+        if _raw_terms:
+            add = (' AND ' + _raw_terms) if _terms else _raw_terms
+            _terms += add
+        return _terms
 
     def prep_bulk_documents(self, action, documents):
         if not isinstance(documents, list):
@@ -523,7 +533,7 @@ class ES(object):
         _raw_terms = params.pop('q', '')
 
         if 'body' not in params:
-            query_string = build_qs(params.remove(RESERVED_PARAMS), _raw_terms)
+            query_string = self.build_qs(params.remove(RESERVED_PARAMS), _raw_terms)
             if query_string:
                 _params['body'] = {
                     'query': {
@@ -546,10 +556,19 @@ class ES(object):
             params['_limit'])
 
         if '_sort' in params:
+            terms = params['_sort'].split('.')
+
+            # Substitute nested terms in sort
+            if len(terms) >= 1 and terms[0] in self.proxy.substitutions:
+                terms[0] += "_nested"
+                params['_sort'] = ".".join(terms)
+
             _params['sort'] = apply_sort(params['_sort'])
 
         if '_fields' in params:
             _params['fields'] = params['_fields']
+
+            # Substitute nested fields
             terms = params['_fields'].split(',')
             nested_fields = []
 
@@ -561,9 +580,19 @@ class ES(object):
 
         if '_search_fields' in params:
             search_fields = params['_search_fields'].split(',')
+
             search_fields.reverse()
-            search_fields = [s + '^' + str(i) for i, s in
-                             enumerate(search_fields, 1)]
+
+            # Substitute search fields and add ^index
+            for index, search_field in enumerate(search_fields):
+                sf_terms = search_field.split('.')
+
+                if len(sf_terms) > 0 and sf_terms[0] in self.proxy.substitutions:
+                    sf_terms[0] += "_nested"
+                    search_field = '.'.join(sf_terms)
+
+                search_fields[index] = search_field + '^' + str(index + 1)
+
             current_qs = _params['body']['query']['query_string']
             if isinstance(current_qs, str):
                 _params['body']['query']['query_string'] = {'query': current_qs}
