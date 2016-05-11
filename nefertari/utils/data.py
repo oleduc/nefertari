@@ -13,6 +13,9 @@ class DataProxy(object):
         self._raw_data = data or {}
         self._substituted = []
 
+        for key, val in data.items():
+            setattr(self, key, val)
+
     def __setattr__(self, name, value):
         """
         Override __setattr__ to replace nested attributes with their backrefs.
@@ -27,7 +30,7 @@ class DataProxy(object):
         """
 
         if not name.endswith("_nested"):
-            if self.substitutions is not None and name in self.substitutions:
+            if hasattr(self, "substitutions")and self.substitutions is not None and name in self.substitutions:
                 self._substituted.append(name)
                 nested_value = self._raw_data[name + "_nested"]
 

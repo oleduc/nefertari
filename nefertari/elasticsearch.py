@@ -211,6 +211,8 @@ class ES(object):
 
         if self.doc_type in ES.document_proxies:
             self.proxy = ES.document_proxies[self.doc_type]
+        else:
+            self.proxy = None
 
         self.index_name = index_name or self.settings.index_name
         if chunk_size is None:
@@ -526,6 +528,40 @@ class ES(object):
 
         return documents
 
+    def substitute_nested_fields(self, fields, delimiter, first_only=False):
+        terms = fields.split(delimiter)
+
+        if self.proxy is not None and len(terms) > 0:
+            for index in range(0, 1 if first_only else len(terms)):
+                has_modifier = terms[index].startswith('-') or terms[index].startswith('+')
+
+                if has_modifier:
+                    is_substituted = terms[index][1:] in self.proxy.substitutions
+                else:
+                    is_substituted = terms[index] in self.proxy.substitutions
+
+                if is_substituted:
+                    terms[index] += "_nested"
+                    fields = delimiter.join(terms)
+
+        return fields
+
+    def add_nested_fields(self, fields, delimiter):
+        terms = fields
+        nested_fields = []
+
+        if self.proxy is None or len(self.proxy.substitutions) == 0:
+            return fields
+
+        if isinstance(fields, str):
+            terms = fields.split(delimiter)
+
+        for term in terms:
+            if term in self.proxy.substitutions:
+                nested_fields.append(term + "_nested")
+
+        return delimiter.join(terms + nested_fields)
+
     def build_search_params(self, params):
         params = dictset(params)
 
@@ -559,27 +595,12 @@ class ES(object):
             params['_limit'])
 
         if '_sort' in params:
-            terms = params['_sort'].split('.')
-
-            # Substitute nested terms in sort
-            if len(terms) >= 1 and terms[0] in self.proxy.substitutions:
-                terms[0] += "_nested"
-                params['_sort'] = ".".join(terms)
-
+            params['_sort'] = self.substitute_nested_fields(params['_sort'], '.', first_only=True)
             _params['sort'] = apply_sort(params['_sort'])
 
         if '_fields' in params:
+            params['_fields'] = self.add_nested_fields(params['_fields'], ',')
             _params['fields'] = params['_fields']
-
-            # Substitute nested fields
-            terms = params['_fields'].split(',')
-            nested_fields = []
-
-            for term in terms:
-                if term in self.proxy.substitutions:
-                    nested_fields.append(term + "_nested")
-
-            _params['fields'] = ",".join(terms + nested_fields)
 
         if '_search_fields' in params:
             search_fields = params['_search_fields'].split(',')
@@ -590,9 +611,10 @@ class ES(object):
             for index, search_field in enumerate(search_fields):
                 sf_terms = search_field.split('.')
 
-                if len(sf_terms) > 0 and sf_terms[0] in self.proxy.substitutions:
-                    sf_terms[0] += "_nested"
-                    search_field = '.'.join(sf_terms)
+                if self.proxy is not None:
+                    if len(sf_terms) > 0 and sf_terms[0] in self.proxy.substitutions:
+                        sf_terms[0] += "_nested"
+                        search_field = '.'.join(sf_terms)
 
                 search_fields[index] = search_field + '^' + str(index + 1)
 
