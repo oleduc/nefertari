@@ -8,7 +8,6 @@ from pyramid import httpexceptions as http_exc
 
 from nefertari.wrappers import apply_privacy
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -28,7 +27,7 @@ def add_stack(exception):
     if len(trace) <= 1:
         try:
             trace = traceback.format_exc()
-        except AttributeError as e:
+        except AttributeError:
             trace = traceback.format_stack()
 
     return ''.join(trace)
@@ -81,19 +80,17 @@ class JBase(object):
         kw = dictset(kw)
         self.__class__.__base__.__init__(
             self, *arg,
-            **kw.subset(BASE_ATTRS+['headers', 'location']))
+            **kw.subset(BASE_ATTRS + ['headers', 'location']))
 
         create_json_response(self, **kw)
 
 
 thismodule = sys.modules[__name__]
 
-
 http_exceptions = list(http_exc.status_map.values()) + [
     http_exc.HTTPBadRequest,
     http_exc.HTTPInternalServerError,
 ]
-
 
 for exc_cls in http_exceptions:
     name = "J%s" % exc_cls.__name__
