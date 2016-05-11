@@ -208,7 +208,10 @@ class ES(object):
 
     def __init__(self, source='', index_name=None, chunk_size=None):
         self.doc_type = self.src2type(source)
-        self.proxy = ES.document_proxies[self.doc_type]
+
+        if self.doc_type in ES.document_proxies:
+            self.proxy = ES.document_proxies[self.doc_type]
+
         self.index_name = index_name or self.settings.index_name
         if chunk_size is None:
             chunk_size = self.settings.asint('chunk_size')
@@ -682,7 +685,7 @@ class ES(object):
             output_doc = found_doc['_source']
             output_doc['_score'] = found_doc['_score']
             output_doc['_type'] = found_doc['_type']
-            documents.append(dict2proxy(output_doc, self.proxy))
+            documents.append(dict2proxy(output_doc, ES.document_proxies[found_doc['_type']]))
 
         documents._nefertari_meta.update(
             total=data['hits']['total'],

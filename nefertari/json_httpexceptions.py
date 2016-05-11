@@ -30,6 +30,7 @@ def add_stack(exception):
             trace = traceback.format_exc()
         except AttributeError as e:
             trace = traceback.format_stack()
+            wtf = 1
 
     return ''.join(trace)
 

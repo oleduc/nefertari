@@ -29,7 +29,14 @@ class DataProxy(object):
         if not name.endswith("_nested"):
             if self.substitutions is not None and name in self.substitutions:
                 self._substituted.append(name)
-                value = self._raw_data[name + "_nested"]
+                nested_value = self._raw_data[name + "_nested"]
+
+                if isinstance(nested_value, dict):
+                    value = dict2obj(nested_value)
+                elif isinstance(nested_value, list):
+                    value = [dict2obj(sj) if isinstance(sj, dict) else sj for sj in nested_value]
+                else:
+                    value = nested_value
 
             if not hasattr(self.__class__, name):
                 self._data[name] = value
@@ -55,8 +62,6 @@ class DataProxy(object):
                 elif isinstance(val, list):
                     _dict[attr] = to_dicts(val, **kw)
 
-        _dict['_type'] = self.__class__.__name__
-
         return _dict
 
 
@@ -79,6 +84,7 @@ def dict2obj(data, proxy_cls=None):
 
     for key, val in proxy._raw_data.items():
         key = str(key)
+
         if isinstance(val, dict):
             setattr(proxy, key, dict2obj(val))
         elif isinstance(val, list):
