@@ -8,7 +8,6 @@ from pyramid import httpexceptions as http_exc
 
 from nefertari.wrappers import apply_privacy
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -22,8 +21,16 @@ BLACKLIST_LOG = [404]
 BASE_ATTRS = ['status_code', 'explanation', 'message', 'title']
 
 
-def add_stack():
-    return ''.join(traceback.format_stack())
+def add_stack(exception):
+    trace = traceback.format_exception(type(exception), exception, exception.__traceback__)
+
+    if len(trace) <= 1:
+        try:
+            trace = traceback.format_exc()
+        except AttributeError:
+            trace = traceback.format_stack()
+
+    return ''.join(trace)
 
 
 def create_json_response(obj, request=None, log_it=False, show_stack=False,
@@ -55,7 +62,7 @@ def create_json_response(obj, request=None, log_it=False, show_stack=False,
     if 400 <= status < 600 and status not in BLACKLIST_LOG or log_it:
         msg = '%s: %s' % (obj.status.upper(), obj.body)
         if obj.status_int in [400, 500] or show_stack:
-            msg += '\nSTACK BEGIN>>\n%s\nSTACK END<<' % add_stack()
+            msg += '\nSTACK TRACE BEGIN>>\n%s\nSTACK END<<' % add_stack(obj)
 
         logger.error(msg)
 
@@ -73,19 +80,17 @@ class JBase(object):
         kw = dictset(kw)
         self.__class__.__base__.__init__(
             self, *arg,
-            **kw.subset(BASE_ATTRS+['headers', 'location']))
+            **kw.subset(BASE_ATTRS + ['headers', 'location']))
 
         create_json_response(self, **kw)
 
 
 thismodule = sys.modules[__name__]
 
-
 http_exceptions = list(http_exc.status_map.values()) + [
     http_exc.HTTPBadRequest,
     http_exc.HTTPInternalServerError,
 ]
-
 
 for exc_cls in http_exceptions:
     name = "J%s" % exc_cls.__name__

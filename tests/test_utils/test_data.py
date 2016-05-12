@@ -13,36 +13,36 @@ class TestDataUtils(object):
     def test_data_proxy_not_model(self):
         proxy = dutils.DataProxy({'foo': 'bar'})
         data = proxy.to_dict()
-        assert data == {'_type': 'DataProxy', 'foo': 'bar'}
+        assert data == {'foo': 'bar'}
 
     def test_data_proxy_not_model_keys(self):
         proxy = dutils.DataProxy({'foo': 'bar', 'id': 1})
         data = proxy.to_dict(_keys=['foo'])
-        assert data == {'_type': 'DataProxy', 'foo': 'bar'}
+        assert data == {'foo': 'bar'}
 
     def test_data_proxy_model(self):
         obj = DummyModel({'foo1': 'bar1'})
         proxy = dutils.DataProxy({'foo': obj})
         data = proxy.to_dict()
-        assert data == {'_type': 'DataProxy', 'foo': {'foo1': 'bar1'}}
+        assert data == {'foo': {'foo1': 'bar1'}}
 
     def test_data_proxy_model_keys(self):
         obj = DummyModel({'foo1': 'bar1'})
         proxy = dutils.DataProxy({'foo': obj, 'id': 1})
         data = proxy.to_dict(_keys=['foo'])
-        assert data == {'_type': 'DataProxy', 'foo': {'foo1': 'bar1'}}
+        assert data == {'foo': {'foo1': 'bar1'}}
 
     def test_data_proxy_model_no_depth(self):
         obj = DummyModel({'foo1': 'bar1'})
         proxy = dutils.DataProxy({'foo': obj})
         data = proxy.to_dict(_depth=0)
-        assert data == {'_type': 'DataProxy', 'foo': obj}
+        assert data == {'foo': obj}
 
     def test_data_proxy_model_sequence(self):
         obj = DummyModel({'foo1': 'bar1'})
         proxy = dutils.DataProxy({'foo': [obj]})
         data = proxy.to_dict()
-        assert data == {'_type': 'DataProxy', 'foo': [{'foo1': 'bar1'}]}
+        assert data == {'foo': [{'foo1': 'bar1'}]}
 
     def test_dict2obj_regular_value(self):
         obj = dutils.dict2obj({'_type': 'Foo', 'foo': 'bar', 'baz': 1})

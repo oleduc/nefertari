@@ -11,7 +11,6 @@ from nefertari.utils import dictset
 
 
 class TestESHttpConnection(object):
-
     @patch('nefertari.elasticsearch.ESHttpConnection._catch_index_error')
     @patch('nefertari.elasticsearch.log')
     def test_perform_request_debug(self, mock_log, mock_catch):
@@ -23,7 +22,7 @@ class TestESHttpConnection(object):
         conn.perform_request('POST', 'http://localhost:9200')
         mock_log.debug.assert_called_once_with(
             "('POST', 'http://localhost:9200')")
-        conn.perform_request('POST', 'http://localhost:9200'*200)
+        conn.perform_request('POST', 'http://localhost:9200' * 200)
         assert mock_catch.called
         assert mock_log.debug.call_count == 2
 
@@ -118,26 +117,6 @@ class TestHelperFunctions(object):
         terms = es.build_terms('foo', [1, 2, 3], operator='AND')
         assert terms == 'foo:1 AND foo:2 AND foo:3'
 
-    def test_build_qs(self):
-        qs = es.build_qs(dictset({'foo': 1, 'bar': '_all', 'zoo': 2}))
-        assert qs == 'foo:1 AND zoo:2'
-
-    def test_build_list(self):
-        qs = es.build_qs(dictset({'foo': [1, 2], 'zoo': 3}))
-        assert qs == 'foo:1 OR foo:2 AND zoo:3'
-
-    def test_build_dunder_key(self):
-        qs = es.build_qs(dictset({'foo': [1, 2], '__zoo__': 3}))
-        assert qs == 'foo:1 OR foo:2'
-
-    def test_build_raw_terms(self):
-        qs = es.build_qs(dictset({'foo': [1, 2]}), _raw_terms='qoo:1')
-        assert qs == 'foo:1 OR foo:2 AND qoo:1'
-
-    def test_build_operator(self):
-        qs = es.build_qs(dictset({'foo': 1, 'qoo': 2}), operator='OR')
-        assert qs == 'foo:1 OR qoo:2'
-
     def test_es_docs(self):
         assert issubclass(es._ESDocs, list)
         docs = es._ESDocs()
@@ -156,9 +135,9 @@ class TestHelperFunctions(object):
 
 
 class TestES(object):
-
     @patch('nefertari.elasticsearch.ES.settings')
     def test_init(self, mock_set):
+        es.ES.document_proxies = {'Foo': None, 'Foo2': None}
         obj = es.ES(source='Foo')
         assert obj.index_name == mock_set.index_name
         assert obj.doc_type == 'Foo'
@@ -197,6 +176,31 @@ class TestES(object):
             es.ES.setup(settings)
         assert 'Bad or missing settings for elasticsearch' in str(ex.value)
         assert not mock_es.Elasticsearch.called
+
+    def test_build_qs(self):
+        obj = es.ES('Foo', 'foondex')
+        qs = obj.build_qs(dictset({'foo': 1, 'bar': '_all', 'zoo': 2}))
+        assert qs == 'foo:1 AND zoo:2'
+
+    def test_build_list(self):
+        obj = es.ES('Foo', 'foondex')
+        qs = obj.build_qs(dictset({'foo': [1, 2], 'zoo': 3}))
+        assert qs == 'foo:1 OR foo:2 AND zoo:3'
+
+    def test_build_dunder_key(self):
+        obj = es.ES('Foo', 'foondex')
+        qs = obj.build_qs(dictset({'foo': [1, 2], '__zoo__': 3}))
+        assert qs == 'foo:1 OR foo:2'
+
+    def test_build_raw_terms(self):
+        obj = es.ES('Foo', 'foondex')
+        qs = obj.build_qs(dictset({'foo': [1, 2]}), _raw_terms='qoo:1')
+        assert qs == 'foo:1 OR foo:2 AND qoo:1'
+
+    def test_build_operator(self):
+        obj = es.ES('Foo', 'foondex')
+        qs = obj.build_qs(dictset({'foo': 1, 'qoo': 2}), operator='OR')
+        assert qs == 'foo:1 OR qoo:2'
 
     def test_process_chunks(self):
         obj = es.ES('Foo', 'foondex', chunk_size=100)
@@ -284,10 +288,10 @@ class TestES(object):
             es._bulk_body, request=None)
         mock_proc.assert_called_once_with(
             documents=[{
-                '_id': 'story1', '_op_type': 'index', '_timestamp': 1,
+                '_id': 'story1', '_op_type': 'index',
                 '_source': {'timestamp': 1, '_type': 'Story', 'id': 'story1'}
             }, {
-                '_id': 'story2', '_op_type': 'index', '_timestamp': 2,
+                '_id': 'story2', '_op_type': 'index',
                 '_source': {'timestamp': 2, '_type': 'Story', 'id': 'story2'}
             }],
             operation=mock_part(),
@@ -302,11 +306,60 @@ class TestES(object):
         mock_prep.assert_called_once_with('myaction', ['a'])
         assert not mock_proc.called
 
+    @patch('nefertari.elasticsearch.engine')
+    @patch('nefertari.elasticsearch.ES.index_documents')
+    @patch('nefertari.elasticsearch.ES.index_document')
     @patch('nefertari.elasticsearch.ES._bulk')
-    def test_index(self, mock_bulk):
+    def test_index(self, mock_bulk, mock_index_document, mock_index_documents, mock_engine):
         obj = es.ES('Foo', 'foondex', chunk_size=4)
-        obj.index(['a'])
-        mock_bulk.assert_called_once_with('index', ['a'], None)
+
+        # Indexing a list
+        obj.index(['a'], request={"test": "test"})
+        mock_index_documents.assert_called_once_with(['a'], request={"test": "test"})
+
+        # Indexing a set
+        obj.index({'a'}, request={"test": "test"})
+        mock_index_documents.assert_called_with(['a'], request={"test": "test"})
+        mock_engine.is_object_document = Mock(return_value=True)
+
+        # Indexing a document
+        fake_document = Mock()
+        fake_document.to_indexable_dict = Mock(return_value={"a": "b"})
+        obj.index(fake_document, request=None)
+        mock_bulk.assert_called_once_with("index", {"a": "b"}, None)
+
+    @patch('nefertari.elasticsearch.engine')
+    @patch('nefertari.elasticsearch.ES._bulk')
+    def test_index_document(self, mock_bulk, mock_engine):
+        obj = es.ES('Foo', 'foondex', chunk_size=4)
+
+        fake_document = Mock()
+        fake_document.to_indexable_dict = Mock(return_value={"a": "b"})
+        mock_engine.is_object_document = Mock(return_value=True)
+        obj.index_document(fake_document, request=None)
+        mock_bulk.assert_called_once_with("index", {"a": "b"}, None)
+
+        mock_engine.is_object_document = Mock(return_value=False)
+
+        with pytest.raises(TypeError):
+            obj.index_document("a")
+
+    @patch('nefertari.elasticsearch.engine')
+    @patch('nefertari.elasticsearch.ES._bulk')
+    def test_index_documents(self, mock_bulk, mock_engine):
+        obj = es.ES('Foo', 'foondex', chunk_size=4)
+
+        fake_document = Mock()
+        fake_document.to_indexable_dict = Mock(return_value={"a": "b"})
+        mock_engine.is_object_document = Mock(return_value=True)
+
+        obj.index_documents([fake_document, fake_document], request=None)
+        mock_bulk.assert_called_once_with("index", [{"a": "b"}, {"a": "b"}], None)
+
+        mock_engine.is_object_document = Mock(return_value=False)
+
+        with pytest.raises(TypeError):
+            obj.index_documents([fake_document, fake_document])
 
     @patch('nefertari.elasticsearch.ES._bulk')
     def test_delete(self, mock_bulk):
@@ -404,6 +457,7 @@ class TestES(object):
 
     @patch('nefertari.elasticsearch.ES.api.mget')
     def test_get_by_ids(self, mock_mget):
+        es.ES.document_proxies = {'Foo': None, 'Foo2': None}
         obj = es.ES('Foo', 'foondex')
         documents = [{'_id': 1, '_type': 'Story'}]
         mock_mget.return_value = {
@@ -428,11 +482,12 @@ class TestES(object):
 
     @patch('nefertari.elasticsearch.ES.api.mget')
     def test_get_by_ids_fields(self, mock_mget):
+        es.ES.document_proxies = {'Foo': None, 'Foo2': None}
         obj = es.ES('Foo', 'foondex')
         documents = [{'_id': 1, '_type': 'Story'}]
         mock_mget.return_value = {
             'docs': [{
-                '_type': 'foo',
+                '_type': 'Foo',
                 '_id': 1,
                 '_source': {'_id': 1, '_type': 'Story', 'name': 'bar'},
             }]
@@ -490,7 +545,18 @@ class TestES(object):
             raise Exception('Unexpected error')
         assert len(docs) == 0
 
+    def test_substitute_nested_fields(self):
+        es.ES.document_proxies = {'Foo': Mock(substitutions=['a', 'b', 'c'])}
+        obj = es.ES('Foo', 'foondex')
+        substituted = obj.substitute_nested_fields('-a,+b,c,d,e,a', ',')
+
+        assert substituted == '-a_nested,+b_nested,c_nested,d,e,a_nested'
+
+    def test_add_nested_fields(self):
+        pass
+
     def test_build_search_params_no_body(self):
+        es.ES.document_proxies = {'Foo': None}
         obj = es.ES('Foo', 'foondex')
         params = obj.build_search_params(
             {'foo': 1, 'zoo': 2, 'q': '5', '_limit': 10}
@@ -503,6 +569,7 @@ class TestES(object):
         assert params['doc_type'] == 'Foo'
 
     def test_build_search_params_no_body_no_qs(self):
+        es.ES.document_proxies = {'Foo': None}
         obj = es.ES('Foo', 'foondex')
         params = obj.build_search_params({'_limit': 10})
         assert sorted(params.keys()) == sorted([
@@ -512,6 +579,7 @@ class TestES(object):
         assert params['doc_type'] == 'Foo'
 
     def test_build_search_params_no_limit(self):
+        es.ES.document_proxies = {'Foo': None}
         obj = es.ES('Foo', 'foondex')
         obj.api = Mock()
         obj.api.count.return_value = {'count': 123}
@@ -526,6 +594,7 @@ class TestES(object):
         obj.api.count.assert_called_once_with()
 
     def test_build_search_params_sort(self):
+        es.ES.document_proxies = {'Foo': None}
         obj = es.ES('Foo', 'foondex')
         params = obj.build_search_params({
             'foo': 1, '_sort': '+a,-b,c', '_limit': 10})
@@ -538,6 +607,7 @@ class TestES(object):
         assert params['sort'] == 'a:asc,b:desc,c:asc'
 
     def test_build_search_params_fields(self):
+        es.ES.document_proxies = {'Foo': None}
         obj = es.ES('Foo', 'foondex')
         params = obj.build_search_params({
             'foo': 1, '_fields': ['a'], '_limit': 10})
@@ -550,6 +620,7 @@ class TestES(object):
         assert params['fields'] == ['a']
 
     def test_build_search_params_search_fields(self):
+        es.ES.document_proxies = {'Foo': None}
         obj = es.ES('Foo', 'foondex')
         params = obj.build_search_params({
             'foo': 1, '_search_fields': 'a,b', '_limit': 10})
@@ -562,6 +633,7 @@ class TestES(object):
         assert params['doc_type'] == 'Foo'
 
     def test_build_search_params_with_body(self):
+        es.ES.document_proxies = {'Foo': None}
         obj = es.ES('Foo', 'foondex')
         params = obj.build_search_params({
             'body': {'query': {'query_string': 'foo'}},
@@ -624,7 +696,6 @@ class TestES(object):
         assert resp == {'foo': 1}
         mock_build.assert_called_once_with({'_limit': 0, 'param1': 6})
         mock_search.assert_called_once_with(
-            search_type='count',
             body={'aggregations': {'zoo': 5}, 'query': 'query1'},
         )
 
@@ -664,17 +735,17 @@ class TestES(object):
         mock_count.assert_called_once_with({'foo': 'bar'})
         mock_build.assert_called_once_with({'_count': True, 'foo': 1})
 
-    @patch('nefertari.elasticsearch.ES.build_search_params')
     @patch('nefertari.elasticsearch.ES.do_count')
-    def test_get_collection_count_with_body(self, mock_count, mock_build):
+    def test_get_collection_count_with_body(self, mock_count):
         obj = es.ES('Foo', 'foondex')
         obj.get_collection(_count=True, foo=1, body={'foo': 'bar'})
-        mock_count.assert_called_once_with(
-            {'body': {'foo': 'bar'}, '_count': True, 'foo': 1})
-        assert not mock_build.called
+        mock_count.assert_called_once_with({
+            'body': {'foo': 'bar'}, 'doc_type': 'Foo',
+            'from_': 0, 'size': 1, 'index': 'foondex'})
 
     @patch('nefertari.elasticsearch.ES.api.search')
     def test_get_collection_fields(self, mock_search):
+        es.ES.document_proxies = {'Foo': None, 'Zoo': None}
         obj = es.ES('Foo', 'foondex')
         mock_search.return_value = {
             'hits': {
@@ -685,10 +756,11 @@ class TestES(object):
             'took': 2.8,
         }
         docs = obj.get_collection(
-            fields=['foo'], body={'foo': 'bar'}, from_=0)
+            _fields=['foo'], body={'foo': 'bar'}, from_=0)
         mock_search.assert_called_once_with(
-            body={'foo': 'bar'}, _source_include=['foo', '_type'],
-            from_=0, _source=True)
+            body={'foo': 'bar'}, doc_type='Foo', index='foondex',
+            _source_include=['foo', '_type'], _source=True,
+            from_=0, size=1)
         assert len(docs) == 1
         assert docs[0].id == 1
         assert docs[0]._score == 2
@@ -702,6 +774,7 @@ class TestES(object):
 
     @patch('nefertari.elasticsearch.ES.api.search')
     def test_get_collection_source(self, mock_search):
+        es.ES.document_proxies = {'Foo': None, 'Foo2': None, 'Zoo': None}
         obj = es.ES('Foo', 'foondex')
         mock_search.return_value = {
             'hits': {
@@ -714,7 +787,9 @@ class TestES(object):
             'took': 2.8,
         }
         docs = obj.get_collection(body={'foo': 'bar'}, from_=0)
-        mock_search.assert_called_once_with(body={'foo': 'bar'}, from_=0)
+        mock_search.assert_called_once_with(
+            body={'foo': 'bar'}, doc_type='Foo', from_=0, size=1,
+            index='foondex')
         assert len(docs) == 1
         assert docs[0].id == 1
         assert docs[0]._score == 2
@@ -824,7 +899,7 @@ class TestES(object):
             raise Exception('Unexpected error')
 
     @patch('nefertari.elasticsearch.ES.settings')
-    @patch('nefertari.elasticsearch.ES.index')
+    @patch('nefertari.elasticsearch.ES.index_documents')
     def test_index_relations(self, mock_ind, mock_settings):
         class Foo(object):
             id = None
@@ -855,7 +930,7 @@ class TestES(object):
         assert not mock_ind.called
 
     @patch('nefertari.elasticsearch.ES.settings')
-    @patch('nefertari.elasticsearch.ES.index')
+    @patch('nefertari.elasticsearch.ES.index_documents')
     def test_bulk_index_relations(self, mock_index, mock_settings):
         mock_settings.index_name = 'foo'
 
@@ -873,4 +948,4 @@ class TestES(object):
             (Foo, [doc2])]
 
         es.ES.bulk_index_relations([db_object1, db_object2])
-        mock_index.assert_called_once_with(sorted([doc1, doc2]), request=None)
+        mock_index.assert_called_once_with({doc1, doc2}, request=None)
