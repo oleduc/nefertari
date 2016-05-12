@@ -170,7 +170,7 @@ class _ESDocs(list):
 class ES(object):
     api = None
     settings = None
-    document_proxies = None
+    document_proxies = {}
 
     @classmethod
     def src2type(cls, source):
