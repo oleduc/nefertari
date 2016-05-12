@@ -752,8 +752,8 @@ class ES(object):
 
         if '_type' not in data:
             data['_type'] = self.doc_type
-        wtf = dict2proxy(data, self.proxy)
-        return wtf
+
+        return dict2proxy(data, self.proxy)
 
     @classmethod
     def index_relations(cls, db_obj, request=None, **kwargs):
