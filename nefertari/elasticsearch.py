@@ -440,10 +440,10 @@ class ES(object):
                 '_type': _doc_type,
                 '_id': parent.id,
                 'script': {
-                    "inline": "ctx._source." + _field_name + "[position]=nested_document",
+                    "inline": "for(int i = 0; i < ctx._source."+_field_name+".size(); i++){ if((int)ctx._source."+_field_name+"[i].id == (int)nested_document.id){ ctx._source."+_field_name+"[i] = nested_document; return true; } }",
                     "params": {
                         "position": position,
-                        "nested_document": target.to_dict()
+                        "nested_document": target.to_dict(_depth=0)
                     }
                 }
             }
