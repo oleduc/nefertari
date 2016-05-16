@@ -130,6 +130,23 @@ def to_dicts(collection, key=None, **kw):
     return _dicts
 
 
+def to_indexable_dicts(collection, key=None, **kw):
+    _dicts = []
+    try:
+        for each in collection:
+            try:
+                each_dict = each.to_indexable_dict(**kw)
+                if key:
+                    each_dict = key(each_dict)
+                _dicts.append(each_dict)
+            except AttributeError:
+                _dicts.append(each)
+    except TypeError:
+        return collection
+
+    return _dicts
+
+
 def obj2dict(obj, classkey=None):
     if isinstance(obj, dict):
         for k in obj.keys():
