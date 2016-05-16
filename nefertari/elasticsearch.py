@@ -420,6 +420,67 @@ class ES(object):
         """ Reindex all `document`s. """
         self._bulk('index', dict_documents, request)
 
+    def index_nested_document(self, parent, field, target, request=None):
+        actions = []
+        _doc_type = self.src2type(getattr(parent, '_type', self.doc_type))
+        target_field = getattr(parent, field)
+        _field_name = field + "_nested" if field in parent._nested_relationships else field
+
+        if isinstance(target_field, list):
+            for index, child in enumerate(target_field):
+                if child.id == target.id:
+                    position = index
+                    break
+            else:
+                raise Exception("Could not find nested document in parent!")
+
+            action = {
+                '_op_type': 'update',
+                '_index': 'cerri_api',
+                '_type': _doc_type,
+                '_id': parent.id,
+                'script': {
+                    "inline": "ctx._source." + _field_name + "[position]=nested_document",
+                    "params": {
+                        "position": position,
+                        "nested_document": target.to_dict()
+                    }
+                }
+            }
+            actions.append(action)
+        else:
+            raise Exception("Death from above")
+
+        _bulk_body(actions, request)
+
+    def prep_bulk_documents(self, action, documents):
+        if not isinstance(documents, list):
+            documents = [documents]
+
+        docs_actions = []
+        for doc in documents:
+            if not isinstance(doc, dict):
+                raise ValueError(
+                    'Document type must be `dict` not a `{}`'.format(
+                        type(doc).__name__))
+
+            if '_type' in doc:
+                _doc_type = self.src2type(doc.pop('_type'))
+            else:
+                _doc_type = self.doc_type
+
+            doc_action = {
+                '_op_type': action,
+                '_index': self.index_name,
+                '_type': _doc_type,
+                '_id': doc['_pk'],
+                '_source': doc,
+            }
+
+            docs_actions.append(doc_action)
+
+        return docs_actions
+
     def index_missing_documents(self, documents, request=None):
         """ Index documents that are missing from ES index.
 
