@@ -453,34 +453,6 @@ class ES(object):
 
         _bulk_body(actions, request)
 
-    def prep_bulk_documents(self, action, documents):
-        if not isinstance(documents, list):
-            documents = [documents]
-
-        docs_actions = []
-        for doc in documents:
-            if not isinstance(doc, dict):
-                raise ValueError(
-                    'Document type must be `dict` not a `{}`'.format(
-                        type(doc).__name__))
-
-            if '_type' in doc:
-                _doc_type = self.src2type(doc.pop('_type'))
-            else:
-                _doc_type = self.doc_type
-
-            doc_action = {
-                '_op_type': action,
-                '_index': self.index_name,
-                '_type': _doc_type,
-                '_id': doc['_pk'],
-                '_source': doc,
-            }
-
-            docs_actions.append(doc_action)
-
-        return docs_actions
-
     def index_missing_documents(self, documents, request=None):
         """ Index documents that are missing from ES index.
 
