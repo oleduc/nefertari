@@ -6,7 +6,7 @@ from pyramid.paster import bootstrap
 from pyramid.config import Configurator
 from six.moves import urllib
 
-from nefertari.utils import dictset, split_strip, to_dicts
+from nefertari.utils import dictset, split_strip, to_dicts, to_indexable_dicts
 from nefertari.elasticsearch import ES
 from nefertari import engine
 
@@ -97,7 +97,7 @@ class ESCommand(object):
             es = ES(source=model_name, index_name=self.options.index,
                     chunk_size=chunk_size)
             query_set = model.get_collection(**params)
-            documents = to_dicts(query_set)
+            documents = to_indexable_dicts(query_set)
             self.log.info('Indexing missing `{}` documents'.format(
                 model_name))
             es.index_missing_documents(documents)
@@ -119,5 +119,7 @@ class ESCommand(object):
                 name for name, model in models.items()
                 if getattr(model, '_index_enabled', False)]
         else:
+            ES.setup_mappings()
             model_names = split_strip(self.options.models)
+
         self.index_models(model_names)
