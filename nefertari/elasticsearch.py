@@ -427,29 +427,22 @@ class ES(object):
         _field_name = field + "_nested" if field in parent._nested_relationships else field
 
         if isinstance(target_field, list):
-            for index, child in enumerate(target_field):
-                if child.id == target.id:
-                    position = index
-                    break
-            else:
-                raise Exception("Could not find nested document in parent!")
-
             action = {
                 '_op_type': 'update',
-                '_index': 'cerri_api',
+                '_index': self.index_name,
                 '_type': _doc_type,
                 '_id': parent.id,
                 'script': {
-                    "inline": "for(int i = 0; i < ctx._source."+_field_name+".size(); i++){ if((int)ctx._source."+_field_name+"[i].id == (int)nested_document.id){ ctx._source."+_field_name+"[i] = nested_document; return true; } }",
+                    "file": "nested_update",
                     "params": {
-                        "position": position,
+                        "field_name": _field_name,
                         "nested_document": target.to_dict(_depth=0)
                     }
                 }
             }
             actions.append(action)
         else:
-            raise Exception("Death from above")
+            raise Exception("A nested document that is not in a list should not use partial update.")
 
         _bulk_body(actions, request)
 
