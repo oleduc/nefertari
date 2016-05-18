@@ -420,6 +420,32 @@ class ES(object):
         """ Reindex all `document`s. """
         self._bulk('index', dict_documents, request)
 
+    def index_nested_document(self, parent, field, target, request=None):
+        actions = []
+        _doc_type = self.src2type(getattr(parent, '_type', self.doc_type))
+        target_field = getattr(parent, field)
+        _field_name = field + "_nested" if field in parent._nested_relationships else field
+
+        if isinstance(target_field, list):
+            action = {
+                '_op_type': 'update',
+                '_index': self.index_name,
+                '_type': _doc_type,
+                '_id': parent.id,
+                'script': {
+                    "file": "nested_update",
+                    "params": {
+                        "field_name": _field_name,
+                        "nested_document": target.to_dict(_depth=0)
+                    }
+                }
+            }
+            actions.append(action)
+        else:
+            raise Exception("A nested document that is not in a list should not use partial update.")
+
+        _bulk_body(actions, request)
+
     def index_missing_documents(self, documents, request=None):
         """ Index documents that are missing from ES index.
 
