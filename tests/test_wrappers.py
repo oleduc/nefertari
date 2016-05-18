@@ -126,7 +126,7 @@ class TestWrappers(unittest.TestCase):
 
     def test_add_object_url_collection(self):
         result = {'data': [{'_pk': 4, '_type': 'Story'}]}
-        request = Mock()
+        request = Mock(matchdict=None)
         wrapper = wrappers.add_object_url(request=request)
         wrapper.model_collections = {
             'Story': Mock(uid='stories_resource', id_name='story_id'),
@@ -138,7 +138,7 @@ class TestWrappers(unittest.TestCase):
 
     def test_add_object_url_item(self):
         result = {'_pk': 4, '_type': 'Story'}
-        request = Mock()
+        request = Mock(matchdict=None)
         wrapper = wrappers.add_object_url(request=request)
         wrapper.model_collections = {
             'Story': Mock(uid='stories_resource', id_name='story_id'),
@@ -146,6 +146,18 @@ class TestWrappers(unittest.TestCase):
         result = wrapper(result=result)
         request.route_url.assert_called_once_with(
             'stories_resource', story_id=4)
+        assert result['_self'] == request.route_url()
+
+    def test_add_object_url_with_parent(self):
+        result = {'_pk': 4, '_type': 'Story'}
+        request = Mock(matchdict={'user_username': 'admin'})
+        wrapper = wrappers.add_object_url(request=request)
+        wrapper.model_collections = {
+            'Story': Mock(uid='stories_resource', id_name='story_id'),
+        }
+        result = wrapper(result=result)
+        request.route_url.assert_called_once_with(
+            'stories_resource', user_username='admin', story_id=4)
         assert result['_self'] == request.route_url()
 
     @patch('nefertari.utils.validate_data_privacy')
@@ -233,49 +245,6 @@ class TestWrappers(unittest.TestCase):
         assert result['count'] == 12321
         assert result['confirmation_url'] == (
             'http://example.com/api?__confirmation&_m=GET')
-
-    def test_add_etag_no_data(self):
-        wrapper = wrappers.add_etag(Mock())
-        wrapper.request.response.etag = None
-        wrapper(result={'data': []})
-        assert wrapper.request.response.etag is None
-        wrapper(result={})
-        assert wrapper.request.response.etag is None
-
-    def test_add_etag(self):
-        wrapper = wrappers.add_etag(Mock())
-        wrapper.request.response.etag = None
-        wrapper(result={'data': [
-            {'_pk': 1, '_version': 1},
-            {'_pk': 2, '_version': 1},
-        ]})
-        expected1 = '20d135f0f28185b84a4cf7aa51f29500'
-        assert wrapper.request.response.etag == expected1
-
-        # Etag is the same when data isn't changed
-        wrapper(result={'data': [
-            {'_pk': 1, '_version': 1},
-            {'_pk': 2, '_version': 1},
-        ]})
-        assert isinstance(wrapper.request.response.etag, six.string_types)
-        assert wrapper.request.response.etag == expected1
-
-        # New object added
-        wrapper(result={'data': [
-            {'_pk': 1, '_version': 1},
-            {'_pk': 2, '_version': 1},
-            {'_pk': 3, '_version': 1},
-        ]})
-        assert isinstance(wrapper.request.response.etag, six.string_types)
-        assert wrapper.request.response.etag != expected1
-
-        # Existing object's version changed
-        wrapper(result={'data': [
-            {'_pk': 1, '_version': 1},
-            {'_pk': 2, '_version': 2},
-        ]})
-        assert isinstance(wrapper.request.response.etag, six.string_types)
-        assert wrapper.request.response.etag != expected1
 
     def test_set_total(self):
         result = Mock(_nefertari_meta={'total': 5})

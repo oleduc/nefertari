@@ -4,8 +4,47 @@ from nefertari.utils.utils import issequence
 
 
 class DataProxy(object):
-    def __init__(self, data={}):
-        self._data = dictset(data)
+    _data = None
+    _raw_data = None
+    _substituted = None
+
+    def __init__(self, data=None):
+        self._data = {}
+        self._raw_data = data or {}
+        self._substituted = []
+
+        for key, val in data.items():
+            setattr(self, key, val)
+
+    def __setattr__(self, name, value):
+        """
+        Override __setattr__ to replace nested attributes with their backrefs.
+        Since we can't have multiple fields with the same names and different mappings and that nested and non nested
+        backrefs might have the same name but different mappins, we expand the nested backrefs into:
+        Type.backref_name = {type:long}
+        Type.backref_name_nested = {*object properties*}
+        Which means that objects that are being read from ES need to have backref_name replaced with backref_name_nested
+        This is where we do this operation as it is the common denominator of all indexed objects.
+        :param name:
+        :param value:
+        """
+
+        if not name.endswith("_nested"):
+            if hasattr(self, "substitutions")and self.substitutions is not None and name in self.substitutions:
+                self._substituted.append(name)
+                nested_value = self._raw_data[name + "_nested"]
+
+                if isinstance(nested_value, dict):
+                    value = dict2obj(nested_value)
+                elif isinstance(nested_value, list):
+                    value = [dict2obj(sj) if isinstance(sj, dict) else sj for sj in nested_value]
+                else:
+                    value = nested_value
+
+            if not hasattr(self.__class__, name):
+                self._data[name] = value
+
+            super(DataProxy, self).__setattr__(name, value)
 
     def to_dict(self, **kwargs):
         _dict = dictset()
@@ -16,6 +55,7 @@ class DataProxy(object):
 
         for attr, val in data.items():
             _dict[attr] = val
+
             if _depth:
                 kw = kwargs.copy()
                 kw['_depth'] = _depth - 1
@@ -25,29 +65,43 @@ class DataProxy(object):
                 elif isinstance(val, list):
                     _dict[attr] = to_dicts(val, **kw)
 
-        _dict['_type'] = self.__class__.__name__
         return _dict
 
 
-def dict2obj(data):
+def dict2obj(data, proxy_cls=None):
     if not data:
         return data
 
-    _type = str(data.get('_type'))
-    top = type(_type, (DataProxy,), {})(data)
+    # Here we create a dynamic type of DataProxy, with the same name as document type.
+    # Todo: Make it more consistent with real document instances.
+    if proxy_cls is None:
+        _type = str(data.get('_type'))
+        proxy_cls = type(_type, (DataProxy,), {
+            "__init__": DataProxy.__init__,
+            "__setattr__": DataProxy.__setattr__,
+            "substitutions": None,
+            "to_dict": DataProxy.to_dict
+        })
 
-    for key, val in top._data.items():
+    proxy = proxy_cls(data)
+
+    for key, val in proxy._raw_data.items():
         key = str(key)
+
         if isinstance(val, dict):
-            setattr(top, key, dict2obj(val))
+            setattr(proxy, key, dict2obj(val))
         elif isinstance(val, list):
             setattr(
-                top, key,
+                proxy, key,
                 [dict2obj(sj) if isinstance(sj, dict) else sj for sj in val])
         else:
-            setattr(top, key, val)
+            setattr(proxy, key, val)
 
-    return top
+    return proxy
+
+
+def dict2proxy(data, proxy):
+    return dict2obj(data, proxy)
 
 
 def to_objs(collection):
@@ -65,6 +119,23 @@ def to_dicts(collection, key=None, **kw):
         for each in collection:
             try:
                 each_dict = each.to_dict(**kw)
+                if key:
+                    each_dict = key(each_dict)
+                _dicts.append(each_dict)
+            except AttributeError:
+                _dicts.append(each)
+    except TypeError:
+        return collection
+
+    return _dicts
+
+
+def to_indexable_dicts(collection, key=None, **kw):
+    _dicts = []
+    try:
+        for each in collection:
+            try:
+                each_dict = each.to_indexable_dict(**kw)
                 if key:
                     each_dict = key(each_dict)
                 _dicts.append(each_dict)

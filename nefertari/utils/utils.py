@@ -41,7 +41,7 @@ def process_limit(start, page, limit):
         if start is not None:
             start = int(start)
         elif page is not None:
-            start = int(page)*limit
+            start = int(page) * limit
         else:
             start = 0
 

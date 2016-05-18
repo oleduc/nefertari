@@ -290,8 +290,8 @@ class add_meta(object):
 class add_object_url(object):
     """ Add '_self' to each object in results
 
-    For each object in `result['data']` adds a uri which points
-    to current object
+    For each object in `result['data']` fetches a uri from pyramid
+    which points to current object
     """
     def __init__(self, request):
         self.request = request
@@ -301,6 +301,11 @@ class add_object_url(object):
         """ Add '_self' key value to :obj: dict. """
         from nefertari.elasticsearch import ES
         location = self.request.path_url
+        route_kwargs = {}
+
+        """ Check for parents """
+        if self.request.matchdict:
+            route_kwargs.update(self.request.matchdict)
         try:
             type_, obj_pk = obj['_type'], obj['_pk']
         except KeyError:
@@ -308,8 +313,9 @@ class add_object_url(object):
         resource = (self.model_collections.get(type_) or
                     self.model_collections.get(ES.src2type(type_)))
         if resource is not None:
+            route_kwargs.update({resource.id_name: obj_pk})
             location = self.request.route_url(
-                resource.uid, **{resource.id_name: obj_pk})
+                resource.uid, **route_kwargs)
         obj.setdefault('_self', location)
 
     def __call__(self, **kwargs):
@@ -350,43 +356,6 @@ class add_confirmation_url(object):
             count=engine.BaseDocument.count(result),
             confirmation_url=self.request.url+'%s__confirmation&_m=%s' % (
                 q_or_a, self.request.method))
-
-
-class add_etag(object):
-    """ Add ETAG header to response.
-
-    Etag is generated md5-encoding '_version' + '_pk' of each object
-    in a sequence of objects returned.
-
-    This wrapper should be applied before `apply_privacy` if later is
-    used or before any wrapper that may remove `_version` and `_pk` keys
-    from output.
-    """
-    def __init__(self, request):
-        self.request = request
-
-    def __call__(self, **kwargs):
-        result = kwargs['result']
-
-        etag_src = ''
-
-        def etag(data):
-            return str(data.get('_version', '')) + str(data.get('_pk', ''))
-
-        try:
-            etag_src += etag(result)
-
-            for each in result['data']:
-                etag_src += etag(each)
-
-        except (TypeError, KeyError):
-            pass
-
-        finally:
-            if etag_src:
-                etag = md5(six.b(etag_src)).hexdigest()
-                self.request.response.etag = etag
-            return result
 
 
 class set_total(object):

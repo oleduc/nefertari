@@ -10,7 +10,7 @@ import os
 import six
 
 from nefertari.utils import (
-    dictset, dict2obj, process_limit, split_strip, to_dicts)
+    dictset, dict2proxy, process_limit, split_strip, to_dicts, DataProxy)
 from nefertari.json_httpexceptions import (
     JHTTPBadRequest, JHTTPNotFound, exception_response)
 from nefertari import engine, RESERVED_PARAMS
@@ -107,8 +107,10 @@ def _bulk_body(documents_actions, request):
         query_params = {}
     else:
         query_params = request.params.mixed()
+
     query_params = dictset(query_params)
     refresh_enabled = ES.settings.asbool('enable_refresh_query')
+
     if '_refresh_index' in query_params and refresh_enabled:
         kwargs['refresh'] = query_params.asbool('_refresh_index')
 
@@ -158,28 +160,6 @@ def build_terms(name, values, operator='OR'):
     return (' %s ' % operator).join(['%s:%s' % (name, v) for v in values])
 
 
-def build_qs(params, _raw_terms='', operator='AND'):
-    # if param is _all then remove it
-    params.pop_by_values('_all')
-
-    terms = []
-
-    for k, v in params.items():
-        if k.startswith('__'):
-            continue
-        if type(v) is list:
-            terms.append(build_terms(k, v))
-        else:
-            terms.append('%s:%s' % (k, v))
-
-    terms = sorted([term for term in terms if term])
-    _terms = (' %s ' % operator).join(terms)
-    if _raw_terms:
-        add = (' AND ' + _raw_terms) if _terms else _raw_terms
-        _terms += add
-    return _terms
-
-
 class _ESDocs(list):
     def __init__(self, *args, **kw):
         self._total = 0
@@ -190,6 +170,7 @@ class _ESDocs(list):
 class ES(object):
     api = None
     settings = None
+    document_proxies = {}
 
     @classmethod
     def src2type(cls, source):
@@ -200,6 +181,7 @@ class ES(object):
     def setup(cls, settings):
         cls.settings = settings.mget('elasticsearch')
         cls.settings.setdefault('chunk_size', 500)
+        cls.document_proxies = {}
 
         try:
             _hosts = cls.settings.hosts
@@ -226,6 +208,12 @@ class ES(object):
 
     def __init__(self, source='', index_name=None, chunk_size=None):
         self.doc_type = self.src2type(source)
+
+        if self.doc_type in ES.document_proxies:
+            self.proxy = ES.document_proxies[self.doc_type]
+        else:
+            self.proxy = None
+
         self.index_name = index_name or self.settings.index_name
         if chunk_size is None:
             chunk_size = self.settings.asint('chunk_size')
@@ -245,6 +233,14 @@ class ES(object):
             )
 
     @classmethod
+    def delete_index(cls, index_name=None):
+        index_name = index_name or cls.settings.index_name
+        try:
+            cls.api.indices.delete([index_name])
+        except (IndexNotFoundException, JHTTPNotFound):
+            return
+
+    @classmethod
     def setup_mappings(cls, force=False):
         """ Setup ES mappings for all existing models.
 
@@ -262,20 +258,31 @@ class ES(object):
             return
         log.info('Setting up ES mappings for all existing models')
         models = engine.get_document_classes()
+
         try:
             for model_name, model_cls in models.items():
                 if getattr(model_cls, '_index_enabled', False):
+                    mapping, substitutions = model_cls.get_es_mapping()
+                    cls.setup_document_proxy(model_cls.__name__, substitutions)
+
                     es = cls(model_cls.__name__)
-                    es.put_mapping(body=model_cls.get_es_mapping())
+                    es.put_mapping(body=mapping)
         except JHTTPBadRequest as ex:
             raise Exception(ex.json['extra']['data'])
+
         cls._mappings_setup = True
 
-    def delete_mapping(self):
-        self.api.indices.delete_mapping(
-            index=self.index_name,
-            doc_type=self.doc_type,
-        )
+    @classmethod
+    def setup_document_proxy(cls, type_name, substitutions):
+        cls.document_proxies[type_name] = type(type_name, (DataProxy,), {
+            "__init__": DataProxy.__init__,
+            "__setattr__": DataProxy.__setattr__,
+            "substitutions": list(),
+            "to_dict": DataProxy.to_dict
+        })
+
+        if len(substitutions) > 0:
+            cls.document_proxies[type_name].substitutions = substitutions
 
     def put_mapping(self, body, **kwargs):
         self.api.indices.put_mapping(
@@ -303,6 +310,38 @@ class ES(object):
 
             start += chunk_size
             count -= chunk_size
+
+    def build_qs(self, params, _raw_terms='', operator='AND'):
+        # if param is _all then remove it
+        params.pop_by_values('_all')
+
+        terms = []
+
+        for k, v in params.items():
+            if k.startswith('__'):
+                continue
+
+            key = k
+
+            # Substitute nested key names
+            if '.' in key:
+                key_terms = key.split('.')
+
+                if len(key_terms) >= 1 and key_terms[0] in self.proxy.substitutions:
+                    key_terms[0] += "_nested"
+                    key = '.'.join(key_terms)
+
+            if type(v) is list:
+                terms.append(build_terms(key, v))
+            else:
+                terms.append('%s:%s' % (key, v))
+
+        terms = sorted([term for term in terms if term])
+        _terms = (' %s ' % operator).join(terms)
+        if _raw_terms:
+            add = (' AND ' + _raw_terms) if _terms else _raw_terms
+            _terms += add
+        return _terms
 
     def prep_bulk_documents(self, action, documents):
         if not isinstance(documents, list):
@@ -339,12 +378,6 @@ class ES(object):
 
         documents_actions = self.prep_bulk_documents(action, documents)
 
-        if action == 'index':
-            for doc in documents_actions:
-                doc_data = doc.get('_source', {})
-                if 'timestamp' in doc_data:
-                    doc['_timestamp'] = doc_data['timestamp']
-
         if documents_actions:
             operation = partial(_bulk_body, request=request)
             self.process_chunks(
@@ -354,8 +387,64 @@ class ES(object):
             log.warning('Empty body')
 
     def index(self, documents, request=None, **kwargs):
+        if isinstance(documents, list):
+            self.index_documents(documents, request=request)
+        elif isinstance(documents, set):
+            self.index_documents(list(documents), request=request)
+        elif engine.is_object_document(documents):
+            self._bulk('index', documents.to_indexable_dict(), request)
+        else:
+            raise TypeError(
+                'Documents type must be `list`,`set` or `BaseDocument` not a `{}`'.format(
+                    type(documents).__name__))
+
+    def index_document(self, document, request=None):
+        if engine.is_object_document(document):
+            """ Reindex all `document`s. """
+            self._bulk('index', document.to_indexable_dict(), request)
+        else:
+            raise TypeError(
+                'Document type must be an instance of a type extending `BaseDocument` not a `{}`'.format(
+                    type(document).__name__))
+
+    def index_documents(self, documents, request=None):
+        dict_documents = []
+
+        for document in documents:
+            if engine.is_object_document(document):
+                dict_documents.append(document.to_indexable_dict())
+            else:
+                raise TypeError("nefertari.elasticsearch.index_documents takes a list of documents extending "
+                                "BaseDocument")
+
         """ Reindex all `document`s. """
-        self._bulk('index', documents, request)
+        self._bulk('index', dict_documents, request)
+
+    def index_nested_document(self, parent, field, target, request=None):
+        actions = []
+        _doc_type = self.src2type(getattr(parent, '_type', self.doc_type))
+        target_field = getattr(parent, field)
+        _field_name = field + "_nested" if field in parent._nested_relationships else field
+
+        if isinstance(target_field, list):
+            action = {
+                '_op_type': 'update',
+                '_index': self.index_name,
+                '_type': _doc_type,
+                '_id': parent.id,
+                'script': {
+                    "file": "nested_update",
+                    "params": {
+                        "field_name": _field_name,
+                        "nested_document": target.to_dict(_depth=0)
+                    }
+                }
+            }
+            actions.append(action)
+        else:
+            raise Exception("A nested document that is not in a list should not use partial update.")
+
+        _bulk_body(actions, request)
 
     def index_missing_documents(self, documents, request=None):
         """ Index documents that are missing from ES index.
@@ -366,6 +455,7 @@ class ES(object):
         """
         log.info('Trying to index documents of type `{}` missing from '
                  '`{}` index'.format(self.doc_type, self.index_name))
+
         if not documents:
             log.info('No documents to index')
             return
@@ -456,13 +546,47 @@ class ES(object):
                     log.error(msg)
                     continue
 
-            documents.append(dict2obj(dictset(output_doc)))
+            documents.append(dict2proxy(dictset(output_doc), ES.document_proxies[found_doc['_type']]))
 
         documents._nefertari_meta.update(
             total=len(documents),
         )
 
         return documents
+
+    def substitute_nested_fields(self, fields, delimiter, first_only=False):
+        terms = fields.split(delimiter)
+
+        if self.proxy is not None and len(terms) > 0:
+            for index in range(0, 1 if first_only else len(terms)):
+                has_modifier = terms[index].startswith('-') or terms[index].startswith('+')
+
+                if has_modifier:
+                    is_substituted = terms[index][1:] in self.proxy.substitutions
+                else:
+                    is_substituted = terms[index] in self.proxy.substitutions
+
+                if is_substituted:
+                    terms[index] += "_nested"
+                    fields = delimiter.join(terms)
+
+        return fields
+
+    def add_nested_fields(self, fields, delimiter):
+        terms = fields
+        nested_fields = []
+
+        if self.proxy is None or len(self.proxy.substitutions) == 0:
+            return fields
+
+        if isinstance(fields, str):
+            terms = fields.split(delimiter)
+
+        for term in terms:
+            if term in self.proxy.substitutions:
+                nested_fields.append(term + "_nested")
+
+        return delimiter.join(terms + nested_fields)
 
     def build_search_params(self, params):
         params = dictset(params)
@@ -474,7 +598,7 @@ class ES(object):
         _raw_terms = params.pop('q', '')
 
         if 'body' not in params:
-            query_string = build_qs(params.remove(RESERVED_PARAMS), _raw_terms)
+            query_string = self.build_qs(params.remove(RESERVED_PARAMS), _raw_terms)
             if query_string:
                 _params['body'] = {
                     'query': {
@@ -497,17 +621,31 @@ class ES(object):
             params['_limit'])
 
         if '_sort' in params:
+            params['_sort'] = self.substitute_nested_fields(params['_sort'], '.', first_only=True)
             _params['sort'] = apply_sort(params['_sort'])
 
         if '_fields' in params:
+            params['_fields'] = self.add_nested_fields(params['_fields'], ',')
             _params['fields'] = params['_fields']
 
         if '_search_fields' in params:
             search_fields = params['_search_fields'].split(',')
+
             search_fields.reverse()
-            search_fields = [s + '^' + str(i) for i, s in
-                             enumerate(search_fields, 1)]
+
+            # Substitute search fields and add ^index
+            for index, search_field in enumerate(search_fields):
+                sf_terms = search_field.split('.')
+
+                if self.proxy is not None:
+                    if len(sf_terms) > 0 and sf_terms[0] in self.proxy.substitutions:
+                        sf_terms[0] += "_nested"
+                        search_field = '.'.join(sf_terms)
+
+                search_fields[index] = search_field + '^' + str(index + 1)
+
             current_qs = _params['body']['query']['query_string']
+
             if isinstance(current_qs, str):
                 _params['body']['query']['query_string'] = {'query': current_qs}
             _params['body']['query']['query_string']['fields'] = search_fields
@@ -533,13 +671,9 @@ class ES(object):
             :_raise_on_empty: Boolean indicating whether to raise exception
                 when IndexNotFoundException exception happens. Optional,
                 defaults to False.
-            :_search_type: Type of search to use. Optional, defaults to
-                'count'. You might want to provide this argument explicitly
-                when performing nested aggregations on buckets.
         """
         _aggregations_params = params.pop('_aggregations_params', None)
         _raise_on_empty = params.pop('_raise_on_empty', False)
-        _search_type = params.pop('_search_type', 'count')
 
         if not _aggregations_params:
             raise Exception('Missing _aggregations_params')
@@ -551,7 +685,6 @@ class ES(object):
         search_params.pop('from_', None)
         search_params.pop('sort', None)
 
-        search_params['search_type'] = _search_type
         search_params['body']['aggregations'] = _aggregations_params
 
         log.debug('Performing aggregation: {}'.format(_aggregations_params))
@@ -570,11 +703,7 @@ class ES(object):
 
     def get_collection(self, **params):
         _raise_on_empty = params.pop('_raise_on_empty', False)
-
-        if 'body' in params:
-            _params = params
-        else:
-            _params = self.build_search_params(params)
+        _params = self.build_search_params(params)
 
         if '_count' in params:
             return self.do_count(_params)
@@ -604,7 +733,7 @@ class ES(object):
             output_doc = found_doc['_source']
             output_doc['_score'] = found_doc['_score']
             output_doc['_type'] = found_doc['_type']
-            documents.append(dict2obj(output_doc))
+            documents.append(dict2proxy(output_doc, ES.document_proxies[found_doc['_type']]))
 
         documents._nefertari_meta.update(
             total=data['hits']['total'],
@@ -650,7 +779,7 @@ class ES(object):
         if '_type' not in data:
             data['_type'] = self.doc_type
 
-        return dict2obj(data)
+        return dict2proxy(data, self.proxy)
 
     @classmethod
     def index_relations(cls, db_obj, request=None, **kwargs):
@@ -663,21 +792,19 @@ class ES(object):
                     if getattr(child, pk_name) is not None:
                         children_to_index.append(child)
 
-                cls(model_cls.__name__).index(
-                    to_dicts(children_to_index), request=request)
+                cls(model_cls.__name__).index_documents(children_to_index, request=request)
 
     @classmethod
     def bulk_index_relations(cls, items, request=None, **kwargs):
         """ Index objects related to :items: in bulk.
-
         Related items are first grouped in map
         {model_name: {item1, item2, ...}} and then indexed.
-
         :param items: Sequence of DB objects related objects if which
             should be indexed.
         :param request: Pyramid Request instance.
         """
         index_map = defaultdict(set)
+
         for item in items:
             relations = item.get_related_documents(**kwargs)
             for model_cls, related_items in relations:
@@ -686,4 +813,4 @@ class ES(object):
                     index_map[model_cls.__name__].update(related_items)
 
         for model_name, instances in index_map.items():
-            cls(model_name).index(to_dicts(instances), request=request)
+            cls(model_name).index_documents(instances, request=request)
