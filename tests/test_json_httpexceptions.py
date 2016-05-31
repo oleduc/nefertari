@@ -20,7 +20,9 @@ class TestJSONHTTPExceptionsModule(object):
     @patch.object(jsonex, 'traceback')
     def test_add_stack(self, mock_trace):
         mock_trace.format_stack.return_value = ['foo', 'bar']
-        assert jsonex.add_stack() == 'foobar'
+        mock_trace.format_exception.return_value = ['foo', 'bar']
+        mock_trace.format_exc.return_value = ['foo', 'bar']
+        assert jsonex.add_stack(Mock(__traceback__=None)) == 'foobar'
 
     def test_create_json_response(self):
         request = Mock(
@@ -76,19 +78,19 @@ class TestJSONHTTPExceptionsModule(object):
 
         obj = Mock(status_int=500, location='http://example.com/api')
         jsonex.create_json_response(obj, None, encoder=_JSONEncoder)
-        mock_stack.assert_called_with()
+        mock_stack.assert_called()
         assert mock_stack.call_count == 1
 
         obj = Mock(status_int=401, location='http://example.com/api')
         jsonex.create_json_response(
             obj, None, encoder=_JSONEncoder, show_stack=True)
-        mock_stack.assert_called_with()
+        mock_stack.assert_called()
         assert mock_stack.call_count == 2
 
         obj = Mock(status_int=401, location='http://example.com/api')
         jsonex.create_json_response(
             obj, None, encoder=_JSONEncoder, log_it=True)
-        mock_stack.assert_called_with()
+        mock_stack.assert_called()
         assert mock_stack.call_count == 3
 
     def test_create_json_response_with_body(self):
@@ -112,13 +114,15 @@ class TestJSONHTTPExceptionsModule(object):
         jsonex.STATUS_MAP.pop(12345, None)
 
     def test_status_map(self):
-        assert list(sorted(jsonex.STATUS_MAP.keys())) == [
+        codes = [
             200, 201, 202, 203, 204, 205, 206,
             300, 301, 302, 303, 304, 305, 307,
             400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410,
             411, 412, 413, 414, 415, 416, 417, 422, 423, 424,
             500, 501, 502, 503, 504, 505, 507
         ]
+        for code in codes:
+            assert code in jsonex.STATUS_MAP
         for code_exc in jsonex.STATUS_MAP.values():
             assert hasattr(jsonex, code_exc.__name__)
 
