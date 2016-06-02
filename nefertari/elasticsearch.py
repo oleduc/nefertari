@@ -1,4 +1,5 @@
 from __future__ import absolute_import
+import copy
 import json
 import logging
 from functools import partial
@@ -154,6 +155,39 @@ def apply_sort(_sort):
                 _sort_param.append(each + ':asc')
 
     return ','.join(_sort_param)
+
+
+def substitute_nested_terms(raw_query, substitutions):
+    """
+    This function searches for keywords immediately followed by a dot ('.') that is not within double quotes and appends
+    "_nested" to found keywords
+    :param raw_query:
+    :param substitutions:
+    :return: Substituted raw_query
+    """
+    subbed_raw_terms = raw_query
+
+    in_quotes = False
+
+    cursor = len(raw_query) - 1
+
+    while cursor > 1:
+        if subbed_raw_terms[cursor] == '.' and not in_quotes:
+            match = None
+            for field in substitutions:
+                if subbed_raw_terms[cursor - len(field):cursor] == field:
+                    match = field
+                    break
+
+            if match is not None:
+                subbed_raw_terms = subbed_raw_terms[:cursor] + "_nested" + subbed_raw_terms[cursor:]
+        else:
+            if subbed_raw_terms[cursor] == '"' and subbed_raw_terms[cursor - 1] != "\\":
+                in_quotes = not in_quotes
+
+        cursor -= 1
+
+    return subbed_raw_terms
 
 
 def build_terms(name, values, operator='OR'):
@@ -339,6 +373,7 @@ class ES(object):
         terms = sorted([term for term in terms if term])
         _terms = (' %s ' % operator).join(terms)
         if _raw_terms:
+            _raw_terms = substitute_nested_terms(_raw_terms, self.proxy.substitutions)
             add = (' AND ' + _raw_terms) if _terms else _raw_terms
             _terms += add
         return _terms
