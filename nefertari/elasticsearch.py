@@ -339,6 +339,7 @@ class ES(object):
         terms = sorted([term for term in terms if term])
         _terms = (' %s ' % operator).join(terms)
         if _raw_terms:
+            _raw_terms = _raw_terms.replace(".", "_nested.")
             add = (' AND ' + _raw_terms) if _terms else _raw_terms
             _terms += add
         return _terms
