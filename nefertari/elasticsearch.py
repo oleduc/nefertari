@@ -182,7 +182,7 @@ def substitute_nested_terms(raw_query, substitutions):
             if match is not None:
                 subbed_raw_terms = subbed_raw_terms[:cursor] + "_nested" + subbed_raw_terms[cursor:]
         else:
-            if subbed_raw_terms[cursor] == '"' and subbed_raw_terms[cursor - 1] != "/":
+            if subbed_raw_terms[cursor] == '"' and subbed_raw_terms[cursor - 1] != "\\":
                 in_quotes = not in_quotes
 
         cursor -= 1
