@@ -656,7 +656,7 @@ class ES(object):
             params['_limit'])
 
         if '_sort' in params:
-            params['_sort'] = self.substitute_nested_fields(params['_sort'], '.', first_only=True)
+            params['_sort'] = substitute_nested_terms(params['_sort'], self.proxy.substitutions)
             _params['sort'] = apply_sort(params['_sort'])
 
         if '_fields' in params:
