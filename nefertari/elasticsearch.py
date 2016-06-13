@@ -648,7 +648,7 @@ class ES(object):
             _params['body'] = params['body']
 
         if '_limit' not in params:
-            params['_limit'] = self.api.count()['count']
+            params['_limit'] = self.api.count(index=self.index_name)['count']
 
         _params['from_'], _params['size'] = process_limit(
             params.get('_start', None),
