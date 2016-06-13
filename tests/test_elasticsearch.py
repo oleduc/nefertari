@@ -591,7 +591,7 @@ class TestES(object):
             'index': 'foondex',
             'size': 123
         }
-        obj.api.count.assert_called_once_with()
+        obj.api.count.assert_called_once_with(index='foondex')
 
     def test_build_search_params_sort(self):
         es.ES.document_proxies = {'Foo': None}
