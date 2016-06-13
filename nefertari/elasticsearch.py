@@ -466,7 +466,7 @@ class ES(object):
                 '_op_type': 'update',
                 '_index': self.index_name,
                 '_type': _doc_type,
-                '_id': parent.id,
+                '_id': getattr(parent, parent.pk_field()),
                 'script': {
                     "file": "nested_update",
                     "params": {
