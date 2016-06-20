@@ -389,12 +389,14 @@ class ES(object):
 
         terms = sorted([term for term in terms if term])
         _terms = (' %s ' % operator).join(terms)
-        if _raw_terms:
-            _raw_terms = substitute_nested_terms(_raw_terms, self.proxy.substitutions)\
-                if not self.polymorphic else _raw_terms
 
+        if _raw_terms and self.proxy:
+            _raw_terms = substitute_nested_terms(_raw_terms, self.proxy.substitutions)
+
+        if _raw_terms:
             add = (' AND ' + _raw_terms) if _terms else _raw_terms
             _terms += add
+
         return _terms
 
     def prep_bulk_documents(self, action, documents):
@@ -674,8 +676,10 @@ class ES(object):
             params.get('_page', None),
             params['_limit'])
 
-        if '_sort' in params:
+        if '_sort' in params and self.proxy:
             params['_sort'] = substitute_nested_terms(params['_sort'], self.proxy.substitutions)
+
+        if '_sort' in params:
             _params['sort'] = apply_sort(params['_sort'])
 
         if '_fields' in params:
