@@ -72,7 +72,6 @@ def includeme(config):
     # Load custom index settings
     index_settings = None
     index_settings_path = None
-
     if "elasticsearch.index.settings_file" in Settings:
         index_settings_path = Settings["elasticsearch.index.settings_file"]
 
@@ -201,10 +200,26 @@ class _ESDocs(list):
         super(_ESDocs, self).__init__(*args, **kw)
 
 
+class DocumentProxy(object):
+    document_proxies = {}
+
+    @classmethod
+    def update_document_proxies(cls, key, value):
+        cls.document_proxies[key] = value
+
+    @classmethod
+    def get_document_proxies(cls, key=None):
+
+        if key and key in cls.document_proxies:
+            return cls.document_proxies[key]
+
+        return cls.document_proxies
+
+
 class ES(object):
     api = None
     settings = None
-    document_proxies = {}
+    document_proxy = DocumentProxy
 
     @classmethod
     def src2type(cls, source):
@@ -215,7 +230,6 @@ class ES(object):
     def setup(cls, settings):
         cls.settings = settings.mget('elasticsearch')
         cls.settings.setdefault('chunk_size', 500)
-        cls.document_proxies = {}
 
         try:
             _hosts = cls.settings.hosts
@@ -240,11 +254,12 @@ class ES(object):
             raise Exception(
                 'Bad or missing settings for elasticsearch. %s' % e)
 
-    def __init__(self, source='', index_name=None, chunk_size=None):
+    def __init__(self, source='', index_name=None, chunk_size=None, polymorphic=False):
         self.doc_type = self.src2type(source)
+        self.polymorphic = polymorphic
 
-        if self.doc_type in ES.document_proxies:
-            self.proxy = ES.document_proxies[self.doc_type]
+        if self.doc_type in ES.document_proxy.get_document_proxies():
+            self.proxy = ES.document_proxy.get_document_proxies(self.doc_type)
         else:
             self.proxy = None
 
@@ -308,15 +323,17 @@ class ES(object):
 
     @classmethod
     def setup_document_proxy(cls, type_name, substitutions):
-        cls.document_proxies[type_name] = type(type_name, (DataProxy,), {
+        value = type(type_name, (DataProxy,), {
             "__init__": DataProxy.__init__,
             "__setattr__": DataProxy.__setattr__,
             "substitutions": list(),
             "to_dict": DataProxy.to_dict
         })
 
+        cls.document_proxy.update_document_proxies(type_name, value)
+
         if len(substitutions) > 0:
-            cls.document_proxies[type_name].substitutions = substitutions
+            cls.document_proxy.get_document_proxies(type_name).substitutions = substitutions
 
     def put_mapping(self, body, **kwargs):
         self.api.indices.put_mapping(
@@ -357,8 +374,8 @@ class ES(object):
 
             key = k
 
-            # Substitute nested key names
-            if '.' in key:
+            # Substitute nested key names, skip polymorphic search
+            if '.' in key and not self.polymorphic:
                 key_terms = key.split('.')
 
                 if len(key_terms) >= 1 and key_terms[0] in self.proxy.substitutions:
@@ -373,7 +390,9 @@ class ES(object):
         terms = sorted([term for term in terms if term])
         _terms = (' %s ' % operator).join(terms)
         if _raw_terms:
-            _raw_terms = substitute_nested_terms(_raw_terms, self.proxy.substitutions)
+            _raw_terms = substitute_nested_terms(_raw_terms, self.proxy.substitutions)\
+                if not self.polymorphic else _raw_terms
+
             add = (' AND ' + _raw_terms) if _terms else _raw_terms
             _terms += add
         return _terms
@@ -581,7 +600,7 @@ class ES(object):
                     log.error(msg)
                     continue
 
-            documents.append(dict2proxy(dictset(output_doc), ES.document_proxies[found_doc['_type']]))
+            documents.append(dict2proxy(dictset(output_doc), ES.document_proxy.get_document_proxies(found_doc['_type'])))
 
         documents._nefertari_meta.update(
             total=len(documents),
@@ -768,7 +787,7 @@ class ES(object):
             output_doc = found_doc['_source']
             output_doc['_score'] = found_doc['_score']
             output_doc['_type'] = found_doc['_type']
-            documents.append(dict2proxy(output_doc, ES.document_proxies[found_doc['_type']]))
+            documents.append(dict2proxy(output_doc, ES.document_proxy.get_document_proxies(found_doc['_type'])))
 
         documents._nefertari_meta.update(
             total=data['hits']['total'],
