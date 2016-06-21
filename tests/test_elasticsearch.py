@@ -4,7 +4,7 @@ import six
 import pytest
 from mock import Mock, patch, call
 from elasticsearch.exceptions import TransportError
-
+import elasticsearch
 from nefertari import elasticsearch as es
 from nefertari.json_httpexceptions import JHTTPBadRequest, JHTTPNotFound
 from nefertari.utils import dictset
@@ -193,7 +193,7 @@ class TestES(object):
         assert qs == 'foo:1 OR foo:2'
 
     def test_build_raw_terms(self):
-        obj = es.ES('Foo', 'foondex')
+        obj = es.ES('Foo', 'foondex', 100)
         qs = obj.build_qs(dictset({'foo': [1, 2]}), _raw_terms='qoo:1')
         assert qs == 'foo:1 OR foo:2 AND qoo:1'
 
@@ -456,9 +456,11 @@ class TestES(object):
         assert len(docs) == 0
 
     @patch('nefertari.elasticsearch.ES.api.mget')
-    def test_get_by_ids(self, mock_mget):
-        es.ES.document_proxies = {'Foo': None, 'Foo2': None}
-        obj = es.ES('Foo', 'foondex')
+    @patch('nefertari.elasticsearch.ES.api')
+    def test_get_by_ids(self, api, mock_mget):
+        es.ES.document_proxy.update_document_proxies('Foo', None)
+        es.ES.document_proxy.update_document_proxies('Foo2', None)
+        obj = es.ES('Foo', 'foondex', chunk_size=123)
         documents = [{'_id': 1, '_type': 'Story'}]
         mock_mget.return_value = {
             'docs': [{
@@ -535,8 +537,9 @@ class TestES(object):
             obj.get_by_ids(documents, _raise_on_empty=True)
 
     @patch('nefertari.elasticsearch.ES.api.mget')
-    def test_get_by_ids_not_found_not_raise(self, mock_mget):
-        obj = es.ES('Foo', 'foondex')
+    @patch('nefertari.elasticsearch.ES.api')
+    def test_get_by_ids_not_found_not_raise(self, api, mock_mget):
+        obj = es.ES('Foo', 'foondex', chunk_size=50)
         documents = [{'_id': 1, '_type': 'Story'}]
         mock_mget.return_value = {'docs': [{'_type': 'foo', '_id': 1}]}
         try:
@@ -546,8 +549,8 @@ class TestES(object):
         assert len(docs) == 0
 
     def test_substitute_nested_fields(self):
-        es.ES.document_proxies = {'Foo': Mock(substitutions=['a', 'b', 'c'])}
-        obj = es.ES('Foo', 'foondex')
+        es.ES.document_proxy.update_document_proxies('Foo', Mock(substitutions=['a', 'b', 'c']))
+        obj = es.ES('Foo', 'foondex', 110)
         substituted = obj.substitute_nested_fields('-a,+b,c,d,e,a', ',')
 
         assert substituted == '-a_nested,+b_nested,c_nested,d,e,a_nested'
@@ -579,8 +582,8 @@ class TestES(object):
         assert params['doc_type'] == 'Foo'
 
     def test_build_search_params_no_limit(self):
-        es.ES.document_proxies = {'Foo': None}
-        obj = es.ES('Foo', 'foondex')
+        es.ES.document_proxy.update_document_proxies('Foo', None)
+        obj = es.ES('Foo', 'foondex', 123)
         obj.api = Mock()
         obj.api.count.return_value = {'count': 123}
         params = obj.build_search_params({'foo': 1})
@@ -594,8 +597,8 @@ class TestES(object):
         obj.api.count.assert_called_once_with(index='foondex')
 
     def test_build_search_params_sort(self):
-        es.ES.document_proxies = {'Foo': None}
-        obj = es.ES('Foo', 'foondex')
+        es.ES.document_proxy.update_document_proxies('Foo', None)
+        obj = es.ES('Foo', 'foondex', 100)
         params = obj.build_search_params({
             'foo': 1, '_sort': '+a,-b,c', '_limit': 10})
         assert sorted(params.keys()) == sorted([
@@ -620,8 +623,8 @@ class TestES(object):
         assert params['fields'] == ['a']
 
     def test_build_search_params_search_fields(self):
-        es.ES.document_proxies = {'Foo': None}
-        obj = es.ES('Foo', 'foondex')
+        es.ES.document_proxy.update_document_proxies('Foo', None)
+        obj = es.ES('Foo', 'foondex', 200)
         params = obj.build_search_params({
             'foo': 1, '_search_fields': 'a,b', '_limit': 10})
         assert sorted(params.keys()) == sorted([
@@ -633,8 +636,8 @@ class TestES(object):
         assert params['doc_type'] == 'Foo'
 
     def test_build_search_params_with_body(self):
-        es.ES.document_proxies = {'Foo': None}
-        obj = es.ES('Foo', 'foondex')
+        es.ES.document_proxy.update_document_proxies('Foo', None)
+        obj = es.ES('Foo', 'foondex', 100)
         params = obj.build_search_params({
             'body': {'query': {'query_string': 'foo'}},
             '_raw_terms': ' AND q:5',
@@ -736,8 +739,9 @@ class TestES(object):
         mock_build.assert_called_once_with({'_count': True, 'foo': 1})
 
     @patch('nefertari.elasticsearch.ES.do_count')
-    def test_get_collection_count_with_body(self, mock_count):
-        obj = es.ES('Foo', 'foondex')
+    @patch('nefertari.elasticsearch.ES.api')
+    def test_get_collection_count_with_body(self, mock_api, mock_count):
+        obj = es.ES('Foo', 'foondex', 100)
         obj.get_collection(_count=True, foo=1, body={'foo': 'bar'})
         mock_count.assert_called_once_with({
             'body': {'foo': 'bar'}, 'doc_type': 'Foo',
@@ -745,7 +749,8 @@ class TestES(object):
 
     @patch('nefertari.elasticsearch.ES.api.search')
     def test_get_collection_fields(self, mock_search):
-        es.ES.document_proxies = {'Foo': None, 'Zoo': None}
+        es.ES.document_proxy.update_document_proxies('Foo', None)
+        es.ES.document_proxy.update_document_proxies('Zoo', None)
         obj = es.ES('Foo', 'foondex')
         mock_search.return_value = {
             'hits': {
@@ -949,3 +954,18 @@ class TestES(object):
 
         es.ES.bulk_index_relations([db_object1, db_object2])
         mock_index.assert_called_once_with({doc1, doc2}, request=None)
+
+    def test_document_proxies_inheritance(self):
+        es.ES.document_proxy.update_document_proxies('Foo', 'BlaBla')
+
+        class EsChild(es.ES):
+            pass
+
+        assert 'BlaBla' in EsChild.document_proxy.get_document_proxies_by_type('Foo')
+
+    def test_document_proxies_unknown_type(self):
+        with pytest.raises(es.UnknownDocumentProxiesTypeError) as excinfo:
+            es.ES.document_proxy.get_document_proxies_by_type('Bar')
+        assert 'You have no proxy for this Bar document type' in str(excinfo)
+
+
