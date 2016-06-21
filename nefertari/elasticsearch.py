@@ -200,7 +200,7 @@ class _ESDocs(list):
         super(_ESDocs, self).__init__(*args, **kw)
 
 
-class UnknownDocumentProxiesType(AttributeError):
+class UnknownDocumentProxiesTypeError(AttributeError):
     pass
 
 
@@ -219,7 +219,7 @@ class DocumentProxy(object):
     def get_document_proxies_by_type(cls, doc_type):
         if doc_type in cls.document_proxies:
             return cls.document_proxies[doc_type]
-        raise UnknownDocumentProxiesType('You have no proxy for this %s document type' % doc_type)
+        raise UnknownDocumentProxiesTypeError('You have no proxy for this %s document type' % doc_type)
 
 
 class ES(object):

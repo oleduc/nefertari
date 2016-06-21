@@ -964,7 +964,7 @@ class TestES(object):
         assert 'BlaBla' in EsChild.document_proxy.get_document_proxies_by_type('Foo')
 
     def test_document_proxies_unknown_type(self):
-        with pytest.raises(es.UnknownDocumentProxiesType) as excinfo:
+        with pytest.raises(es.UnknownDocumentProxiesTypeError) as excinfo:
             es.ES.document_proxy.get_document_proxies_by_type('Bar')
         assert 'You have no proxy for this Bar document type' in str(excinfo)
 
