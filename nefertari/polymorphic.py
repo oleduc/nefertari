@@ -64,8 +64,7 @@ class PolymorphicHelperMixin(object):
         try:  # Todo: Find a more performant way to detect nefertari-guards
             imp.find_module('nefertari_guards')
             from nefertari_guards.elasticsearch import ACLFilterES
-
-            return ACLFilterES(self.Model.__name__).get_collection(
+            return ACLFilterES(self.Model.__name__, polymorphic=True).get_collection(
                     request=self.request, **self._query_params)
         except ImportError:
             return self.get_collection_es()
