@@ -200,20 +200,26 @@ class _ESDocs(list):
         super(_ESDocs, self).__init__(*args, **kw)
 
 
+class UnknownDocumentProxiesType(AttributeError):
+    pass
+
+
 class DocumentProxy(object):
     document_proxies = {}
 
     @classmethod
-    def update_document_proxies(cls, key, value):
-        cls.document_proxies[key] = value
+    def update_document_proxies(cls, doc_type, value):
+        cls.document_proxies[doc_type] = value
 
     @classmethod
-    def get_document_proxies(cls, key=None):
-
-        if key and key in cls.document_proxies:
-            return cls.document_proxies[key]
-
+    def get_document_proxies(cls):
         return cls.document_proxies
+
+    @classmethod
+    def get_document_proxies_by_type(cls, doc_type):
+        if doc_type in cls.document_proxies:
+            return cls.document_proxies[doc_type]
+        raise UnknownDocumentProxiesType('You have no proxy for this %s document type' % doc_type)
 
 
 class ES(object):
@@ -259,7 +265,7 @@ class ES(object):
         self.polymorphic = polymorphic
 
         if self.doc_type in ES.document_proxy.get_document_proxies():
-            self.proxy = ES.document_proxy.get_document_proxies(self.doc_type)
+            self.proxy = ES.document_proxy.get_document_proxies_by_type(self.doc_type)
         else:
             self.proxy = None
 
@@ -333,7 +339,7 @@ class ES(object):
         cls.document_proxy.update_document_proxies(type_name, value)
 
         if len(substitutions) > 0:
-            cls.document_proxy.get_document_proxies(type_name).substitutions = substitutions
+            cls.document_proxy.get_document_proxies_by_type(type_name).substitutions = substitutions
 
     def put_mapping(self, body, **kwargs):
         self.api.indices.put_mapping(
@@ -602,7 +608,7 @@ class ES(object):
                     log.error(msg)
                     continue
 
-            documents.append(dict2proxy(dictset(output_doc), ES.document_proxy.get_document_proxies(found_doc['_type'])))
+            documents.append(dict2proxy(dictset(output_doc), ES.document_proxy.get_document_proxies_by_type(found_doc['_type'])))
 
         documents._nefertari_meta.update(
             total=len(documents),
@@ -791,7 +797,7 @@ class ES(object):
             output_doc = found_doc['_source']
             output_doc['_score'] = found_doc['_score']
             output_doc['_type'] = found_doc['_type']
-            documents.append(dict2proxy(output_doc, ES.document_proxy.get_document_proxies(found_doc['_type'])))
+            documents.append(dict2proxy(output_doc, ES.document_proxy.get_document_proxies_by_type(found_doc['_type'])))
 
         documents._nefertari_meta.update(
             total=data['hits']['total'],

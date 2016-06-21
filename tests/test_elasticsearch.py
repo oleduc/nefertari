@@ -954,3 +954,18 @@ class TestES(object):
 
         es.ES.bulk_index_relations([db_object1, db_object2])
         mock_index.assert_called_once_with({doc1, doc2}, request=None)
+
+    def test_document_proxies_inheritance(self):
+        es.ES.document_proxy.update_document_proxies('Foo', 'BlaBla')
+
+        class EsChild(es.ES):
+            pass
+
+        assert 'BlaBla' in EsChild.document_proxy.get_document_proxies_by_type('Foo')
+
+    def test_document_proxies_unknown_type(self):
+        with pytest.raises(es.UnknownDocumentProxiesType) as excinfo:
+            es.ES.document_proxy.get_document_proxies_by_type('Bar')
+        assert 'You have no proxy for this Bar document type' in str(excinfo)
+
+
