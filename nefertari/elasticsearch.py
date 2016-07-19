@@ -783,7 +783,11 @@ class ES(object):
             fields=fields)
 
         try:
-            data = self.api.search(**_params)
+            if ("size" in _params and _params["size"] > 10000) or ("limit" in _params and _params["limit"] > 10000):
+                _params["scroll"] = "1m"
+                data = self.api.search(**_params)
+            else:
+                data = self.api.search(**_params)
         except IndexNotFoundException:
             if _raise_on_empty:
                 raise JHTTPNotFound(
