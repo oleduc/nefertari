@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 
 from nefertari.utils import FieldData, DataProxy
+from nefertari_sqla import ESMetaclass
 
 
 class RequestEvent(object):
@@ -308,6 +309,10 @@ def trigger_events(view_obj):
     yield
 
     if do_trigger:
+
+        if isinstance(type(view_obj.context), ESMetaclass):
+            event_kwargs['instance'] = view_obj.context
+
         event_kwargs['response'] = view_obj._response
         after_event = AFTER_EVENTS[event_action]
         request.registry.notify(after_event(**event_kwargs))
