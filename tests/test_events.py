@@ -245,6 +245,22 @@ class TestModelClassIs(object):
         event = events.BeforeIndex(view=None, model=B)
         assert predicate(event)
 
+    def test_correct_dictset(self):
+        class A(object):
+            pass
+
+        predicate = events.ModelClassIs(model=A, config=None)
+        event = events.BeforeIndex(view=None, model={"__name__": "A,B"})
+        assert predicate(event)
+        
+    def test_wrong_dictset(self):
+        class C(object):
+            pass
+
+        predicate = events.ModelClassIs(model=C, config=None)
+        event = events.BeforeIndex(view=None, model={"__name__": "A,B"})
+        assert not predicate(event)
+
 
 class TestFieldIsChanged(object):
     def test_field_changed(self):
