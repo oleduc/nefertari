@@ -107,6 +107,9 @@ class BaseView(OptionsViewMixin):
         For method tunneling, _json_params contains the same data as
         _query_params.
         """
+        if request.registry.settings.get('enable_monitoring', False) == 'true':
+            import newrelic.agent
+            newrelic.agent.set_transaction_name('%s %s' % (request.method, request.path_info))
         self.context = context
         self.request = request
 
