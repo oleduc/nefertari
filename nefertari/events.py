@@ -247,6 +247,12 @@ class ModelClassIs(object):
         * event.model is the same class as self.model
         * event.model is subclass of self.model
         """
+        if isinstance(event.model, dict):
+            for model_name in event.model["__name__"].split(","):
+                if model_name == self.model.__name__:
+                    return True
+            return False
+
         return issubclass(event.model, self.model)
 
 
