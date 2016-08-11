@@ -212,7 +212,13 @@ class apply_privacy(object):
 
         if not isinstance(result, dict):
             return result
-        data = result.get('data', result)
+
+        is_collection = 'data' in result and '_pk' not in result
+
+        if is_collection:
+            data = result['data']
+        else:
+            data = result
 
         if data and isinstance(data, (dict, list)):
             self.is_admin = kwargs.get('is_admin')
@@ -229,7 +235,7 @@ class apply_privacy(object):
             else:
                 data = self._filter_fields(data)
 
-        if 'data' in result:
+        if is_collection:
             result['data'] = data
         else:
             result = data
