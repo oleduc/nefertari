@@ -3,6 +3,10 @@ from nefertari.utils.dictset import dictset
 from nefertari.utils.utils import issequence
 
 
+class DocumentView(dictset):
+    pass
+
+
 class DataProxy(object):
     _data = None
     _raw_data = None

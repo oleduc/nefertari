@@ -31,12 +31,13 @@ class RequestEvent(object):
         if it is returned by view method.
     """
     def __init__(self, model, view,
-                 fields=None, field=None, instance=None,
+                 fields=None, field=None, initial_state=None, instance=None,
                  response=None):
         self.model = model
         self.view = view
         self.fields = fields
         self.field = field
+        self.initial_state = initial_state
         self.instance = instance
         self.response = response
 
@@ -299,14 +300,14 @@ def trigger_events(view_obj):
         event_kwargs = {
             'view': view_obj,
             'model': view_obj.Model,
+            'initial_state': view_obj.initial_state,
             'fields': FieldData.from_dict(
                 view_obj._json_params,
                 view_obj.Model)
         }
         ctx = view_obj.context
 
-        if hasattr(ctx, 'pk_field') or isinstance(ctx, DataProxy) or \
-                (type(view_obj.Model) is object and isinstance(ctx, view_obj.Model)):
+        if isinstance(type(view_obj.context), ESMetaclass):
             event_kwargs['instance'] = ctx
 
         before_event = BEFORE_EVENTS[event_action]
