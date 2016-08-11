@@ -428,6 +428,35 @@ class TestApplyPrivacy(object):
             result={'data': 1}, is_admin=True) == {'data': 1}
 
     @patch('nefertari.wrappers.engine')
+    def test_data_regular_attribute(self, mock_eng):
+        document_cls = Mock(
+            _public_fields=[],
+            _auth_fields=['data'],
+            _hidden_fields=[])
+        mock_eng.get_document_cls.return_value = document_cls
+        request = Mock(user=Mock())
+        filtered = wrappers.apply_privacy(request)(
+            result={
+                '_acl': [],
+                '_type': 'foo',
+                '_self': 'http://example.com/1',
+                '_pk': 'Subban',
+                'data': {
+                    'stuff': 1,
+                    'other_stuff': True,
+                }
+            }, is_admin=False)
+        assert filtered == {
+                '_type': 'foo',
+                '_self': 'http://example.com/1',
+                '_pk': 'Subban',
+                'data': {
+                    'stuff': 1,
+                    'other_stuff': True,
+                }
+            }
+
+    @patch('nefertari.wrappers.engine')
     def test_item_admin_calculated(self, mock_eng):
         document_cls = Mock(
             _public_fields=['name', 'desc'],
