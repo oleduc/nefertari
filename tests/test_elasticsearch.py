@@ -560,7 +560,7 @@ class TestES(object):
 
     def test_build_search_params_no_body(self):
         es.ES.document_proxies = {'Foo': None}
-        obj = es.ES('Foo', 'foondex')
+        obj = es.ES('Foo', 'foondex', chunk_size=122)
         params = obj.build_search_params(
             {'foo': 1, 'zoo': 2, 'q': '5', '_limit': 10}
         )
@@ -999,6 +999,27 @@ class TestES(object):
             {'bool':
                  {'must_not':
                       [{'match': {'assignments_nested.assignee_id': 'someuse'}}]}}}
+
+    def test_build_search_params_with_nested(self):
+        es.ES.document_proxies = {'FSoo': None}
+        obj = es.ES('FSoo', 'foosndex', chunk_size=122)
+        params = obj.build_search_params(
+            {'foo': 1, 'zoo': 2, 'q': '5', '_limit': 10, '_nested': 'assignments.assignee_id: someuse AND NOT assignments.assignor_id: someusesaqk '}
+        )
+        print(params)
+        assert params == {'body':
+                              {'query':
+                                   {'bool':
+                                        {'must':
+                                             [
+                                                 {'nested': {'query': {'bool': {'must_not':
+                                                                                 [{'match': {'assignments_nested.assignor_id': 'someusesaqk'}}],
+                                                                             'must': [{'match': {'assignments_nested.assignee_id': 'someuse'}}]}},
+                                                          'path': 'assignments_nested'}
+                                               }, {'query_string': {'query': 'foo:1 AND zoo:2 AND 5'}}
+                                             ]}}},
+                          'from_': 0, 'index': 'foosndex', 'doc_type': 'FSoo', 'size': 10}
+
 
     def test_nested_query_complicated(self):
         params = 'NOT assignments.assignee_id: someuse AND NOT assignments.assignor_id: someusesaqk AND assignments.is_completed:true'
