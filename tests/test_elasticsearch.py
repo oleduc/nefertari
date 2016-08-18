@@ -1020,7 +1020,6 @@ class TestES(object):
                                              ]}}},
                           'from_': 0, 'index': 'foosndex', 'doc_type': 'FSoo', 'size': 10}
 
-
     def test_nested_query_complicated(self):
         params = 'NOT assignments.assignee_id: someuse AND NOT assignments.assignor_id: someusesaqk AND assignments.is_completed:true'
         obj = es.ES('Foo', 'foondex', chunk_size=100)
