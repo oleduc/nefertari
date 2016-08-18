@@ -307,7 +307,8 @@ def trigger_events(view_obj):
         }
         ctx = view_obj.context
 
-        if isinstance(type(view_obj.context), ESMetaclass):
+        # Using __class__ instead of type() for mockability
+        if isinstance(ctx.__class__, ESMetaclass):
             event_kwargs['instance'] = ctx
 
         before_event = BEFORE_EVENTS[event_action]

@@ -1,17 +1,18 @@
 from mock import patch, Mock, call
 
 from nefertari import events
+from nefertari_sqla import ESBaseDocumengit commit t
 
 
 class TestEvents(object):
     def test_request_event_init(self):
-        obj = events.RequestEvent(
-            view=1, model=2, fields=3, field=4, instance=5)
-        assert obj.view == 1
-        assert obj.model == 2
+        obj = events.RequestEvent(model=1, view=2, fields=3, field=4, initial_state=5, instance=6)
+        assert obj.model == 1
+        assert obj.view == 2
         assert obj.fields == 3
         assert obj.field == 4
-        assert obj.instance == 5
+        assert obj.initial_state == 5
+        assert obj.instance == 6
 
     def test_set_field_value_field_present(self):
         view = Mock(_json_params={})
@@ -42,12 +43,16 @@ class TestEvents(object):
         mock_after = Mock()
         mock_before = Mock()
         mock_from.return_value = {'foo': 1}
-        ctx = Mock()
+
+        ctx = Mock(spec=ESBaseDocument)
+
+        mock_initial_state = Mock()
         view = Mock(
             request=Mock(action='index'),
             _json_params={'bar': 1},
             context=ctx,
-            _silent=False)
+            _silent=False,
+            initial_state=mock_initial_state)
         view.index._silent = False
         view.index._event_action = None
 
@@ -58,10 +63,10 @@ class TestEvents(object):
 
         mock_after.assert_called_once_with(
             fields={'foo': 1}, model=view.Model, instance=ctx,
-            view=view, response=view._response)
+            view=view, response=view._response, initial_state=mock_initial_state)
         mock_before.assert_called_once_with(
             fields={'foo': 1}, model=view.Model, instance=ctx,
-            view=view)
+            view=view, initial_state=mock_initial_state)
         view.request.registry.notify.assert_has_calls([
             call(mock_before()),
             call(mock_after()),
@@ -131,12 +136,14 @@ class TestEvents(object):
         mock_after = Mock()
         mock_before = Mock()
         ctx = A()
+        mock_initial_state = Mock()
         view = Mock(
             Model=A,
             request=Mock(action='index'),
             _json_params={'bar': 1},
             context=ctx,
-            _silent=False)
+            _silent=False,
+            initial_state=mock_initial_state)
         view.index._silent = None
         view.index._event_action = 'delete'
 
@@ -147,9 +154,9 @@ class TestEvents(object):
 
         mock_after.assert_called_once_with(
             fields={'foo': 1}, model=view.Model, view=view,
-            response=view._response)
+            response=view._response, initial_state=mock_initial_state)
         mock_before.assert_called_once_with(
-            fields={'foo': 1}, model=view.Model, view=view)
+            fields={'foo': 1}, model=view.Model, view=view, initial_state=mock_initial_state)
         view.request.registry.notify.assert_has_calls([
             call(mock_before()),
             call(mock_after()),
