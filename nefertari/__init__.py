@@ -18,6 +18,7 @@ RESERVED_PARAMS = [
     '_sort',
     '_search_fields',
     '_refresh_index',
+    '_nested'
 ]
 
 
