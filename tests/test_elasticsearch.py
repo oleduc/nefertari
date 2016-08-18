@@ -982,7 +982,6 @@ class TestES(object):
         obj = es.ES('Foo', 'foondex', chunk_size=100)
 
         result = obj.build_nested_query({'_nested': params})
-        print(result)
         assert result == {'path': 'assignments_nested', 'query':
             {'bool':
                  {'must':
@@ -994,7 +993,6 @@ class TestES(object):
         obj = es.ES('Foo', 'foondex', chunk_size=100)
 
         result = obj.build_nested_query({'_nested': params})
-        print(result)
         assert result == {'path': 'assignments_nested', 'query':
             {'bool':
                  {'must_not':

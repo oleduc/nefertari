@@ -756,7 +756,7 @@ class ES(object):
             return self.api.count(**params)['count']
         except IndexNotFoundException:
             return 0
-    # 'assignments.assignee_id:User1 AND assignments.is_completed:true'
+
 
     def build_nested_query(self, params):
         nested_string = params.pop('_nested')
