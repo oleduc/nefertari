@@ -763,7 +763,6 @@ class ES(object):
         nested_query = ''
         path_position = None
         start_index = 0
-        # in this case we need change
         for index, key in enumerate(nested_string):
 
             if key == ' ':
@@ -774,7 +773,6 @@ class ES(object):
                 if not path_position:
                     path_position = (start_index, index)
 
-            start_index += 1
             nested_query = nested_query + key
 
         start_index, end_index = path_position

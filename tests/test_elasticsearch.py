@@ -1005,7 +1005,7 @@ class TestES(object):
         obj = es.ES('Foo', 'foondex', chunk_size=100)
         result = obj.build_nested_query({'_nested': params})
         print(result)
-        assert result == {'path': '_nested',
+        assert result == {'path': 'assignments_nested',
                           'query': {'bool':
                                          {'must_not': [{'match': {'assignments_nested.assignee_id': 'someuse'}}, {'match': {'assignments_nested.assignor_id': 'someusesaqk'}}],
                                           'must': [{'match': {'assignments_nested.is_completed': 'true'}}]}}}
