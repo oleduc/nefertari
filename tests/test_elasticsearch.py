@@ -968,4 +968,45 @@ class TestES(object):
             es.ES.document_proxy.get_document_proxies_by_type('Bar')
         assert 'You have no proxy for this Bar document type' in str(excinfo)
 
+    def test_nested_query(self):
+        params = 'assignments.assignee_id: someuse'
+        obj = es.ES('Foo', 'foondex', chunk_size=100)
+        result = obj.build_nested_query({'_nested': params})
+        assert result == {'path': 'assignments_nested', 'query':
+                             {'bool':
+                                 {'must':
+                                    [{'match': {'assignments_nested.assignee_id': 'someuse'}}]}}}
+
+    def test_nested_query_and(self):
+        params = 'assignments.assignee_id: someuse AND assignments.is_completed:true'
+        obj = es.ES('Foo', 'foondex', chunk_size=100)
+
+        result = obj.build_nested_query({'_nested': params})
+        print(result)
+        assert result == {'path': 'assignments_nested', 'query':
+            {'bool':
+                 {'must':
+                      [{'match': {'assignments_nested.assignee_id': 'someuse'}},
+                       {'match': {'assignments_nested.is_completed': 'true'}}]}}}
+
+    def test_nested_query_not(self):
+        params = 'NOT assignments.assignee_id: someuse'
+        obj = es.ES('Foo', 'foondex', chunk_size=100)
+
+        result = obj.build_nested_query({'_nested': params})
+        print(result)
+        assert result == {'path': 'assignments_nested', 'query':
+            {'bool':
+                 {'must_not':
+                      [{'match': {'assignments_nested.assignee_id': 'someuse'}}]}}}
+
+    def test_nested_query_complicated(self):
+        params = 'NOT assignments.assignee_id: someuse AND NOT assignments.assignor_id: someusesaqk AND assignments.is_completed:true'
+        obj = es.ES('Foo', 'foondex', chunk_size=100)
+        result = obj.build_nested_query({'_nested': params})
+        print(result)
+        assert result == {'path': '_nested',
+                          'query': {'bool':
+                                         {'must_not': [{'match': {'assignments_nested.assignee_id': 'someuse'}}, {'match': {'assignments_nested.assignor_id': 'someusesaqk'}}],
+                                          'must': [{'match': {'assignments_nested.is_completed': 'true'}}]}}}
 
