@@ -1,7 +1,7 @@
 from mock import patch, Mock, call
 
 from nefertari import events
-from nefertari_sqla import ESBaseDocumengit commit t
+from nefertari_sqla import ESBaseDocument
 
 
 class TestEvents(object):
