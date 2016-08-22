@@ -7,4 +7,7 @@ sphinx
 sphinxcontrib-fulltoc
 webtest
 
+#nefertari-sqla
+-e ../nefertari-sqla
+
 -e .

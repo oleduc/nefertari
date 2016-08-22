@@ -111,6 +111,7 @@ class BaseView(OptionsViewMixin):
             import newrelic.agent
             newrelic.agent.set_transaction_name('%s %s' % (request.method, request.path_info))
         self.context = context
+        self.initial_state = context.get_view() if hasattr(context, "get_view") else None
         self.request = request
 
         self.prepare_request_params(_query_params, _json_params)

@@ -60,6 +60,7 @@ class TestViewMapper(object):
                 self._json_params = {}
                 self.context = 'foo'
                 self.request = Mock(action='index')
+                self.initial_state = Mock()
 
             @wrap_me(before=bc2)
             def index(self):
