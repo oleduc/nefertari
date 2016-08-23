@@ -56,6 +56,7 @@ class CollectionACL(Contained):
             item.__acl__ = acl
         item.__parent__ = self
         item.__name__ = key
+
         return item
 
     def item_acl(self, item):

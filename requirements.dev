@@ -1,9 +1,13 @@
 mock
+newrelic==2.60.0.46
 pytest
 pytest-cov
 releases
 sphinx
 sphinxcontrib-fulltoc
 webtest
+
+#nefertari-sqla
+-e ../nefertari-sqla
 
 -e .
