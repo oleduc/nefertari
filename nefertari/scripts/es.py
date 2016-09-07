@@ -89,8 +89,7 @@ class ESCommand(object):
             [k, v[0]] for k, v in urllib.parse.parse_qs(params).items()
         ])
         params.setdefault('_limit', params.get('_limit', 10000))
-        chunk_size = self.options.chunk or params['_limit']
-
+        chunk_size = int(self.options.chunk or params['_limit'])
         for model_name in model_names:
             self.log.info('Processing model `{}`'.format(model_name))
             model = engine.get_document_cls(model_name)
