@@ -91,20 +91,24 @@ class ESCommand(object):
             self.log.info('Processing model `{}`'.format(model_name))
             model = engine.get_document_cls(model_name)
 
-            if '_limit' not in params:
-                limit = model.get_collection().count()
-                params['_limit'] = limit
+            local_params = dict()
+            local_params.update(params)
 
-            chunk_size = int(self.options.chunk or params['_limit'])
+            if '_limit' not in local_params:
+                limit = model.get_collection().count()
+                local_params['_limit'] = limit
+
+            chunk_size = int(self.options.chunk or local_params['_limit'])
 
             es = ES(source=model_name, index_name=self.options.index,
                     chunk_size=chunk_size)
 
-            query_set = model.get_collection(**params)
+            query_set = model.get_collection(**local_params)
             documents = to_indexable_dicts(query_set)
             self.log.info('Indexing missing `{}` documents'.format(
                 model_name))
             es.index_missing_documents(documents)
+
 
     def recreate_index(self):
         self.log.info('Deleting index')
