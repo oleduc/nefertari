@@ -85,17 +85,21 @@ class ESCommand(object):
     def index_models(self, model_names):
         self.log.info('Indexing models documents')
         params = self.options.params or ''
-        params = dict([
-            [k, v[0]] for k, v in urllib.parse.parse_qs(params).items()
-        ])
-        params.setdefault('_limit', params.get('_limit', 10000))
-        chunk_size = self.options.chunk or params['_limit']
+        params = dict([[k, v[0]] for k, v in urllib.parse.parse_qs(params).items()])
 
         for model_name in model_names:
             self.log.info('Processing model `{}`'.format(model_name))
             model = engine.get_document_cls(model_name)
+
+            if '_limit' not in params:
+                limit = model.get_collection().count()
+                params['_limit'] = limit
+
+            chunk_size = int(self.options.chunk or params['_limit'])
+
             es = ES(source=model_name, index_name=self.options.index,
                     chunk_size=chunk_size)
+
             query_set = model.get_collection(**params)
             documents = to_indexable_dicts(query_set)
             self.log.info('Indexing missing `{}` documents'.format(
