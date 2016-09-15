@@ -109,7 +109,8 @@ class BaseView(OptionsViewMixin):
         """
         if request.registry.settings.get('enable_monitoring', False) == 'true':
             import newrelic.agent
-            newrelic.agent.set_transaction_name('%s %s' % (request.method, request.path_info))
+            path = request.matched_route.path if request.matched_route else request.path_info
+            newrelic.agent.set_transaction_name('%s %s' % (request.method, path))
         self.context = context
         self.initial_state = context.get_view() if hasattr(context, "get_view") else None
         self.request = request
