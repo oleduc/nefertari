@@ -977,6 +977,28 @@ class TestES(object):
                                  {'must':
                                     [{'match': {'assignments_nested.assignee_id': 'someuse'}}]}}}
 
+    def test_nested_query_with_quotes(self):
+        params = 'assignments.assignee_id: "someuse.user.@b.a.b.la."'
+        obj = es.ES('Foo', 'foondex', chunk_size=100)
+        result = obj.build_nested_query({'_nested': params})
+        assert result == {'path': 'assignments_nested', 'query':
+                             {'bool':
+                                 {'must':
+                                    [{'match': {'assignments_nested.assignee_id':  'someuse.user.@b.a.b.la.'}}]}}}
+
+    def test_nested_query_and_with_quotes(self):
+        params = 'assignments.assignee_id:"someuser.some.last.name" ' \
+                 'AND assignments.assignor_id: "changed.user.name"'
+        obj = es.ES('Foo', 'foondex', chunk_size=100)
+
+        result = obj.build_nested_query({'_nested': params})
+        assert result == {'path': 'assignments_nested', 'query':
+            {'bool':
+                 {'must':
+                      [{'match': {'assignments_nested.assignee_id': 'someuser.some.last.name'}},
+                       {'match': {'assignments_nested.assignor_id': 'changed.user.name'}}]}}}
+
+
     def test_nested_query_and(self):
         params = 'assignments.assignee_id: someuse AND assignments.is_completed:true'
         obj = es.ES('Foo', 'foondex', chunk_size=100)

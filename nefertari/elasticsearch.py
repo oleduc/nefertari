@@ -757,18 +757,25 @@ class ES(object):
         except IndexNotFoundException:
             return 0
 
-
     def build_nested_query(self, params):
         nested_string = params.pop('_nested')
         nested_query = ''
         path_position = None
         start_index = 0
+        in_quotes = False
         for index, key in enumerate(nested_string):
 
             if key == ' ':
                 start_index = index
 
-            if key == '.':
+            if key == '"' and not in_quotes:
+                in_quotes = True
+                key = ''
+            elif key == '"' and in_quotes:
+                in_quotes = False
+                key = ''
+
+            if key == '.' and not in_quotes:
                 key = '_nested.'
                 if not path_position:
                     path_position = (start_index, index)
