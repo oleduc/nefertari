@@ -1,11 +1,13 @@
 from __future__ import absolute_import
-import copy
 import json
 import logging
 from functools import partial
 from collections import defaultdict
 
+
+from nefertari_sqla.utils import SingletonMeta
 import elasticsearch
+from elasticsearch.exceptions import ConflictError, ElasticsearchException
 from elasticsearch import helpers
 import os
 import six
@@ -245,6 +247,71 @@ class DocumentProxy(object):
         raise UnknownDocumentProxiesTypeError('You have no proxy for this %s document type' % doc_type)
 
 
+class BoundedTransaction(type):
+
+    def __call__(cls, *args, **kwargs):
+        import transaction
+        current = transaction.get()
+        es_action_registry = ESActionRegistry()
+        es_action = super(BoundedTransaction, cls).__call__(*args, **kwargs)
+        es_action_registry.subscribe_on_after_commit(current, es_action)
+        return es_action
+
+
+class ESActionRegistry(metaclass=SingletonMeta):
+
+    def __init__(self):
+        self.registry = {}
+
+    def subscribe_on_after_commit(self, transaction, es_action):
+        if transaction in self.registry:
+            self.registry[transaction].append(es_action)
+            return
+        transaction.addAfterCommitHook(self.transaction_hook, kws={'transaction': transaction})
+        self.registry[transaction] = []
+        self.registry[transaction].append(es_action)
+
+    def transaction_hook(self, success, transaction):
+        if success:
+            failed_actions = []
+            for action in self.registry[transaction]:
+                successful, error = action()
+                # retry if indexation failed because of concurrency conflicts
+                if isinstance(error, ConflictError) or isinstance(error, helpers.BulkIndexError):
+                    successful, error = action()
+
+                if not successful:
+                    # handle failed action, maybe schedule reindex round
+                    failed_actions.append((action, error))
+                if failed_actions:
+                    raise ESBulkException([error for action, error in failed_actions])
+
+        del self.registry[transaction]
+
+
+class ESBulkException(ElasticsearchException):
+    def __init__(self, errors):
+        self.errors = errors
+
+    def __repr__(self):
+        return ','.join([str(error) for error in self.errors])
+
+
+class ESAction(metaclass=BoundedTransaction):
+
+    def __init__(self, action, *params, request=None):
+        self.action = action
+        self.params = params
+        self.request = request
+
+    def __call__(self, *args, **kwargs):
+        try:
+            self.action(*self.params, request=self.request)
+        except ElasticsearchException as e:
+            return False, e
+        return True, None
+
+
 class ES(object):
     api = None
     settings = None
@@ -431,7 +498,6 @@ class ES(object):
     def prep_bulk_documents(self, action, documents):
         if not isinstance(documents, list):
             documents = [documents]
-
         docs_actions = []
         for doc in documents:
             if not isinstance(doc, dict):
@@ -460,9 +526,7 @@ class ES(object):
         if not documents:
             log.debug('Empty documents: %s' % self.doc_type)
             return
-
         documents_actions = self.prep_bulk_documents(action, documents)
-
         if documents_actions:
             operation = partial(_bulk_body, request=request)
             self.process_chunks(
@@ -477,7 +541,8 @@ class ES(object):
         elif isinstance(documents, set):
             self.index_documents(list(documents), request=request)
         elif engine.is_object_document(documents):
-            self._bulk('index', documents.to_indexable_dict(), request)
+            ESAction(self._bulk, 'index', documents.to_indexable_dict(), request=request)
+            #self._bulk('index', documents.to_indexable_dict(), request)
         else:
             raise TypeError(
                 'Documents type must be `list`,`set` or `BaseDocument` not a `{}`'.format(
@@ -486,7 +551,8 @@ class ES(object):
     def index_document(self, document, request=None):
         if engine.is_object_document(document):
             """ Reindex all `document`s. """
-            self._bulk('index', document.to_indexable_dict(), request)
+            ESAction(self._bulk, 'index', document.to_indexable_dict(), request=request)
+            #self._bulk('index', document.to_indexable_dict(), request)
         else:
             raise TypeError(
                 'Document type must be an instance of a type extending `BaseDocument` not a `{}`'.format(
@@ -503,7 +569,8 @@ class ES(object):
                                 "BaseDocument")
 
         """ Reindex all `document`s. """
-        self._bulk('index', dict_documents, request)
+        ESAction(self._bulk, 'index', dict_documents, request=request)
+        #self._bulk('index', dict_documents, request)
 
     def index_nested_document(self, parent, field, target, request=None):
         actions = []
@@ -528,8 +595,8 @@ class ES(object):
             actions.append(action)
         else:
             raise Exception("A nested document that is not in a list should not use partial update.")
-
-        _bulk_body(actions, request)
+        ESAction(_bulk_body, actions, request=request)
+        #_bulk_body(actions, request)
 
     def index_missing_documents(self, documents, request=None):
         """ Index documents that are missing from ES index.
@@ -563,15 +630,16 @@ class ES(object):
             log.info('No documents of type `{}` are missing from '
                      'index `{}`'.format(self.doc_type, self.index_name))
             return
-
-        self._bulk('index', documents, request)
+        ESAction(self._bulk, 'index', documents, request=request)
+       # self._bulk('index', documents, request)
 
     def delete(self, ids, request=None):
         if not isinstance(ids, list):
             ids = [ids]
 
         documents = [{'_pk': _id, '_type': self.doc_type} for _id in ids]
-        self._bulk('delete', documents, request=request)
+        ESAction(self._bulk, 'delete', documents, request=request)
+        #self._bulk('delete', documents, request=request)
 
     def get_by_ids(self, ids, **params):
         if not ids:
@@ -925,6 +993,19 @@ class ES(object):
                         children_to_index.append(child)
 
                 cls(model_cls.__name__).index_documents(children_to_index, request=request)
+
+    @classmethod
+    def get_indexable_children(cls):
+        for model_cls, documents in db_obj.get_related_documents(**kwargs):
+            if getattr(model_cls, '_index_enabled', False) and documents:
+                children_to_index = []
+
+                for child in documents:
+                    pk_name = child.pk_field()
+                    if getattr(child, pk_name) is not None:
+                        children_to_index.append(child)
+                yield children_to_index
+            yield []
 
     @classmethod
     def bulk_index_relations(cls, items, request=None, **kwargs):
