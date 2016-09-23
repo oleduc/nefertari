@@ -251,10 +251,10 @@ class BoundedTransaction(type):
 
     def __call__(cls, *args, **kwargs):
         import transaction
-        current = transaction.get()
+        current_transaction = transaction.get()
         es_action_registry = ESActionRegistry()
         es_action = super(BoundedTransaction, cls).__call__(*args, **kwargs)
-        es_action_registry.subscribe_on_after_commit(current, es_action)
+        es_action_registry.subscribe_on_after_commit(current_transaction, es_action)
         return es_action
 
 
@@ -542,7 +542,6 @@ class ES(object):
             self.index_documents(list(documents), request=request)
         elif engine.is_object_document(documents):
             ESAction(self._bulk, 'index', documents.to_indexable_dict(), request=request)
-            #self._bulk('index', documents.to_indexable_dict(), request)
         else:
             raise TypeError(
                 'Documents type must be `list`,`set` or `BaseDocument` not a `{}`'.format(
@@ -552,7 +551,6 @@ class ES(object):
         if engine.is_object_document(document):
             """ Reindex all `document`s. """
             ESAction(self._bulk, 'index', document.to_indexable_dict(), request=request)
-            #self._bulk('index', document.to_indexable_dict(), request)
         else:
             raise TypeError(
                 'Document type must be an instance of a type extending `BaseDocument` not a `{}`'.format(
@@ -570,7 +568,6 @@ class ES(object):
 
         """ Reindex all `document`s. """
         ESAction(self._bulk, 'index', dict_documents, request=request)
-        #self._bulk('index', dict_documents, request)
 
     def index_nested_document(self, parent, field, target, request=None):
         actions = []
@@ -596,7 +593,7 @@ class ES(object):
         else:
             raise Exception("A nested document that is not in a list should not use partial update.")
         ESAction(_bulk_body, actions, request=request)
-        #_bulk_body(actions, request)
+
 
     def index_missing_documents(self, documents, request=None):
         """ Index documents that are missing from ES index.
@@ -631,7 +628,6 @@ class ES(object):
                      'index `{}`'.format(self.doc_type, self.index_name))
             return
         ESAction(self._bulk, 'index', documents, request=request)
-       # self._bulk('index', documents, request)
 
     def delete(self, ids, request=None):
         if not isinstance(ids, list):
@@ -639,7 +635,6 @@ class ES(object):
 
         documents = [{'_pk': _id, '_type': self.doc_type} for _id in ids]
         ESAction(self._bulk, 'delete', documents, request=request)
-        #self._bulk('delete', documents, request=request)
 
     def get_by_ids(self, ids, **params):
         if not ids:
