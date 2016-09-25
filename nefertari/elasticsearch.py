@@ -5,13 +5,13 @@ from functools import partial
 from collections import defaultdict
 
 
-from nefertari_sqla.utils import SingletonMeta
 import elasticsearch
 from elasticsearch.exceptions import ConflictError, ElasticsearchException
 from elasticsearch import helpers
 import os
 import six
 
+from nefertari_sqla.utils import SingletonMeta
 from nefertari.utils import (
     dictset, dict2proxy, process_limit, split_strip, to_dicts, DataProxy)
 from nefertari.json_httpexceptions import (
@@ -116,12 +116,7 @@ def _bulk_body(documents_actions, request):
     if '_refresh_index' in query_params and refresh_enabled:
         kwargs['refresh'] = query_params.asbool('_refresh_index')
 
-    executed_num, errors = helpers.bulk(**kwargs)
-    log.info('Successfully executed {} Elasticsearch action(s)'.format(
-        executed_num))
-    if errors:
-        raise Exception('Errors happened when executing Elasticsearch '
-                        'actions'.format('; '.join(errors)))
+    ESAction(**kwargs)
 
 
 def process_fields_param(fields):
@@ -299,14 +294,17 @@ class ESBulkException(ElasticsearchException):
 
 class ESAction(metaclass=BoundedTransaction):
 
-    def __init__(self, action, *params, request=None):
-        self.action = action
+    def __init__(self, **params):
         self.params = params
-        self.request = request
 
     def __call__(self, *args, **kwargs):
         try:
-            self.action(*self.params, request=self.request)
+            executed_num, errors = helpers.bulk(**self.params)
+            log.info('Successfully executed {} Elasticsearch action(s)'.format(
+                executed_num))
+
+            if errors:
+                return False, errors
         except ElasticsearchException as e:
             return False, e
         return True, None
@@ -541,7 +539,7 @@ class ES(object):
         elif isinstance(documents, set):
             self.index_documents(list(documents), request=request)
         elif engine.is_object_document(documents):
-            ESAction(self._bulk, 'index', documents.to_indexable_dict(), request=request)
+            self._bulk('index', documents.to_indexable_dict(), request)
         else:
             raise TypeError(
                 'Documents type must be `list`,`set` or `BaseDocument` not a `{}`'.format(
@@ -550,7 +548,7 @@ class ES(object):
     def index_document(self, document, request=None):
         if engine.is_object_document(document):
             """ Reindex all `document`s. """
-            ESAction(self._bulk, 'index', document.to_indexable_dict(), request=request)
+            self._bulk('index', document.to_indexable_dict(), request)
         else:
             raise TypeError(
                 'Document type must be an instance of a type extending `BaseDocument` not a `{}`'.format(
@@ -567,7 +565,7 @@ class ES(object):
                                 "BaseDocument")
 
         """ Reindex all `document`s. """
-        ESAction(self._bulk, 'index', dict_documents, request=request)
+        self._bulk('index', dict_documents, request)
 
     def index_nested_document(self, parent, field, target, request=None):
         actions = []
@@ -592,8 +590,8 @@ class ES(object):
             actions.append(action)
         else:
             raise Exception("A nested document that is not in a list should not use partial update.")
-        ESAction(_bulk_body, actions, request=request)
 
+        _bulk_body(actions, request)
 
     def index_missing_documents(self, documents, request=None):
         """ Index documents that are missing from ES index.
@@ -627,14 +625,15 @@ class ES(object):
             log.info('No documents of type `{}` are missing from '
                      'index `{}`'.format(self.doc_type, self.index_name))
             return
-        ESAction(self._bulk, 'index', documents, request=request)
+
+        self._bulk('index', documents, request)
 
     def delete(self, ids, request=None):
         if not isinstance(ids, list):
             ids = [ids]
 
         documents = [{'_pk': _id, '_type': self.doc_type} for _id in ids]
-        ESAction(self._bulk, 'delete', documents, request=request)
+        self._bulk('delete', documents, request=request)
 
     def get_by_ids(self, ids, **params):
         if not ids:
@@ -988,19 +987,6 @@ class ES(object):
                         children_to_index.append(child)
 
                 cls(model_cls.__name__).index_documents(children_to_index, request=request)
-
-    @classmethod
-    def get_indexable_children(cls):
-        for model_cls, documents in db_obj.get_related_documents(**kwargs):
-            if getattr(model_cls, '_index_enabled', False) and documents:
-                children_to_index = []
-
-                for child in documents:
-                    pk_name = child.pk_field()
-                    if getattr(child, pk_name) is not None:
-                        children_to_index.append(child)
-                yield children_to_index
-            yield []
 
     @classmethod
     def bulk_index_relations(cls, items, request=None, **kwargs):
