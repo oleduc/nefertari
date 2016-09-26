@@ -260,10 +260,10 @@ class ESActionRegistry(metaclass=SingletonMeta):
 
     def subscribe_on_after_commit(self, transaction, es_action):
         if transaction in self.registry:
-            self.registry[hash(transaction)].append(es_action)
+            self.registry[transaction].append(es_action)
             return
         transaction.addAfterCommitHook(self.transaction_hook, kws={'transaction': transaction})
-        self.registry[hash(transaction)] = [es_action]
+        self.registry[transaction] = [es_action]
 
     def transaction_hook(self, success, transaction):
         if success:
