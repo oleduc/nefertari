@@ -11,9 +11,9 @@ from elasticsearch import helpers
 import os
 import six
 
-from nefertari_sqla.utils import SingletonMeta
+
 from nefertari.utils import (
-    dictset, dict2proxy, process_limit, split_strip, to_dicts, DataProxy)
+    dictset, dict2proxy, process_limit, split_strip, to_dicts, DataProxy, SingletonMeta)
 from nefertari.json_httpexceptions import (
     JHTTPBadRequest, JHTTPNotFound, exception_response)
 from nefertari import engine, RESERVED_PARAMS
