@@ -242,13 +242,13 @@ class DocumentProxy(object):
         raise UnknownDocumentProxiesTypeError('You have no proxy for this %s document type' % doc_type)
 
 
-class BoundedTransaction(type):
+class BoundAction(type):
 
     def __call__(cls, *args, **kwargs):
         import transaction
         current_transaction = transaction.get()
         es_action_registry = ESActionRegistry()
-        es_action = super(BoundedTransaction, cls).__call__(*args, **kwargs)
+        es_action = super(BoundAction, cls).__call__(*args, **kwargs)
         es_action_registry.subscribe_on_after_commit(current_transaction, es_action)
         return es_action
 
@@ -260,11 +260,10 @@ class ESActionRegistry(metaclass=SingletonMeta):
 
     def subscribe_on_after_commit(self, transaction, es_action):
         if transaction in self.registry:
-            self.registry[transaction].append(es_action)
+            self.registry[hash(transaction)].append(es_action)
             return
         transaction.addAfterCommitHook(self.transaction_hook, kws={'transaction': transaction})
-        self.registry[transaction] = []
-        self.registry[transaction].append(es_action)
+        self.registry[hash(transaction)] = [es_action]
 
     def transaction_hook(self, success, transaction):
         if success:
@@ -292,7 +291,7 @@ class ESBulkException(ElasticsearchException):
         return ','.join([str(error) for error in self.errors])
 
 
-class ESAction(metaclass=BoundedTransaction):
+class ESAction(metaclass=BoundAction):
 
     def __init__(self, **params):
         self.params = params
