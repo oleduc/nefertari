@@ -27,6 +27,8 @@ class dictset(dict):
         return dictset([[k, v] for k, v in self.items() if k not in only])
 
     def __getattr__(self, key):
+        if key not in self:
+            raise AttributeError()
         return self[key]
 
     def __setattr__(self, key, val):

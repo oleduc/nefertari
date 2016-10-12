@@ -189,6 +189,29 @@ def substitute_nested_terms(raw_query, substitutions):
     return subbed_raw_terms
 
 
+def build_nested_terms(query):
+    result_term = {'must': [], 'must_not': []}
+
+    for item in query.split('AND'):
+        item = item.strip()
+        if 'NOT' in item:
+            item = item.replace('NOT', '').strip()
+            key, value = item.split(':')
+            key, value = key.strip(), value.strip()
+            result_term['must_not'].append({'match': {key: value}})
+        else:
+            key, value = item.split(':')
+            key, value = key.strip(), value.strip()
+            result_term['must'].append({'match': {key: value}})
+
+    if not result_term['must_not']:
+        del result_term['must_not']
+
+    if not result_term['must']:
+        del result_term['must']
+    return result_term
+
+
 def build_terms(name, values, operator='OR'):
     return (' %s ' % operator).join(['%s:%s' % (name, v) for v in values])
 
@@ -256,7 +279,7 @@ class ES(object):
                 connection_class=ESHttpConnection, **params)
             log.info('Including Elasticsearch. %s' % cls.settings)
 
-        except KeyError as e:
+        except AttributeError as e:
             raise Exception(
                 'Bad or missing settings for elasticsearch. %s' % e)
 
@@ -673,7 +696,6 @@ class ES(object):
                 _params['body'] = {"query": {"match_all": {}}}
         else:
             _params['body'] = params['body']
-
         if '_limit' not in params:
             params['_limit'] = self.api.count(index=self.index_name)['count']
 
@@ -681,6 +703,16 @@ class ES(object):
             params.get('_start', None),
             params.get('_page', None),
             params['_limit'])
+
+        if '_nested' in params:
+            if 'query' in _params['body']:
+                old_query = _params['body']['query']
+                _params['body']['query'] = {'bool': {'must': []}}
+                nested = dict()
+
+                nested['nested'] = self.build_nested_query(params)
+                _params['body']['query']['bool']['must'].append(nested)
+                _params['body']['query']['bool']['must'].append(old_query)
 
         if '_sort' in params and self.proxy:
             params['_sort'] = substitute_nested_terms(params['_sort'], self.proxy.substitutions)
@@ -713,7 +745,6 @@ class ES(object):
             if isinstance(current_qs, str):
                 _params['body']['query']['query_string'] = {'query': current_qs}
             _params['body']['query']['query_string']['fields'] = search_fields
-
         return _params
 
     def do_count(self, params):
@@ -725,6 +756,39 @@ class ES(object):
             return self.api.count(**params)['count']
         except IndexNotFoundException:
             return 0
+
+    def build_nested_query(self, params):
+        nested_string = params.pop('_nested')
+        nested_query = ''
+        path_position = None
+        start_index = 0
+        in_quotes = False
+        for index, key in enumerate(nested_string):
+
+            if key == ' ':
+                start_index = index
+
+            if key == '"' and not in_quotes:
+                in_quotes = True
+                key = ''
+            elif key == '"' and in_quotes:
+                in_quotes = False
+                key = ''
+
+            if key == '.' and not in_quotes:
+                key = '_nested.'
+                if not path_position:
+                    path_position = (start_index, index)
+
+            nested_query = nested_query + key
+
+        start_index, end_index = path_position
+        path = (nested_string[start_index:end_index] + '_nested').strip()
+
+        _params = build_nested_terms(nested_query)
+        return {'path': path, 'query': {'bool': _params}}
+
+
 
     def aggregate(self, **params):
         """ Perform aggreration
