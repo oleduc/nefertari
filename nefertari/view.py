@@ -306,6 +306,7 @@ class BaseView(OptionsViewMixin):
 
     def not_allowed_action(self, *a, **k):
         raise JHTTPMethodNotAllowed()
+    not_allowed_action._silent = True
 
     def add_before_or_after_call(self, action, _callable, pos=None,
                                  before=True):

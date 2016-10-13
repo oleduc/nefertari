@@ -10,6 +10,7 @@ install_requires = [
     'pyramid',
     'tempita',
     'requests',
+    'nefertari-sqla',
     'simplejson',
     'elasticsearch',
     'blinker',
@@ -42,6 +43,9 @@ setup(
     zip_safe=False,
     test_suite='nefertari',
     install_requires=install_requires,
+    dependency_links=[
+        'git+https://github.com/geniusproject/nefertari.git@master#egg=nefertari',
+    ],
     entry_points="""\
     [console_scripts]
         nefertari.index = nefertari.scripts.es:main

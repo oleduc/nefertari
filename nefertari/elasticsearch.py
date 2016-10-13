@@ -1,17 +1,19 @@
 from __future__ import absolute_import
-import copy
 import json
 import logging
 from functools import partial
 from collections import defaultdict
 
+
 import elasticsearch
+from elasticsearch.exceptions import ConflictError, ElasticsearchException
 from elasticsearch import helpers
 import os
 import six
 
+
 from nefertari.utils import (
-    dictset, dict2proxy, process_limit, split_strip, to_dicts, DataProxy)
+    dictset, dict2proxy, process_limit, split_strip, to_dicts, DataProxy, SingletonMeta)
 from nefertari.json_httpexceptions import (
     JHTTPBadRequest, JHTTPNotFound, exception_response)
 from nefertari import engine, RESERVED_PARAMS
@@ -114,12 +116,7 @@ def _bulk_body(documents_actions, request):
     if '_refresh_index' in query_params and refresh_enabled:
         kwargs['refresh'] = query_params.asbool('_refresh_index')
 
-    executed_num, errors = helpers.bulk(**kwargs)
-    log.info('Successfully executed {} Elasticsearch action(s)'.format(
-        executed_num))
-    if errors:
-        raise Exception('Errors happened when executing Elasticsearch '
-                        'actions'.format('; '.join(errors)))
+    ESAction(**kwargs)
 
 
 def process_fields_param(fields):
@@ -243,6 +240,73 @@ class DocumentProxy(object):
         if doc_type in cls.document_proxies:
             return cls.document_proxies[doc_type]
         raise UnknownDocumentProxiesTypeError('You have no proxy for this %s document type' % doc_type)
+
+
+class BoundAction(type):
+
+    def __call__(cls, *args, **kwargs):
+        import transaction
+        current_transaction = transaction.get()
+        es_action_registry = ESActionRegistry()
+        es_action = super(BoundAction, cls).__call__(*args, **kwargs)
+        es_action_registry.subscribe_on_after_commit(current_transaction, es_action)
+        return es_action
+
+
+class ESActionRegistry(metaclass=SingletonMeta):
+
+    def __init__(self):
+        self.registry = {}
+
+    def subscribe_on_after_commit(self, transaction, es_action):
+        if transaction in self.registry:
+            self.registry[transaction].append(es_action)
+            return
+        transaction.addAfterCommitHook(self.transaction_hook, kws={'transaction': transaction})
+        self.registry[transaction] = [es_action]
+
+    def transaction_hook(self, success, transaction):
+        if success:
+            failed_actions = []
+            for action in self.registry[transaction]:
+                successful, error = action()
+                # retry if indexation failed because of concurrency conflicts
+                if isinstance(error, ConflictError) or isinstance(error, helpers.BulkIndexError):
+                    successful, error = action()
+
+                if not successful:
+                    # handle failed action, maybe schedule reindex round
+                    failed_actions.append((action, error))
+                if failed_actions:
+                    raise ESBulkException([error for action, error in failed_actions])
+
+        del self.registry[transaction]
+
+
+class ESBulkException(ElasticsearchException):
+    def __init__(self, errors):
+        self.errors = errors
+
+    def __repr__(self):
+        return ','.join([str(error) for error in self.errors])
+
+
+class ESAction(metaclass=BoundAction):
+
+    def __init__(self, **params):
+        self.params = params
+
+    def __call__(self, *args, **kwargs):
+        try:
+            executed_num, errors = helpers.bulk(**self.params)
+            log.info('Successfully executed {} Elasticsearch action(s)'.format(
+                executed_num))
+
+            if errors:
+                return False, errors
+        except ElasticsearchException as e:
+            return False, e
+        return True, None
 
 
 class ES(object):
@@ -431,7 +495,6 @@ class ES(object):
     def prep_bulk_documents(self, action, documents):
         if not isinstance(documents, list):
             documents = [documents]
-
         docs_actions = []
         for doc in documents:
             if not isinstance(doc, dict):
@@ -460,9 +523,7 @@ class ES(object):
         if not documents:
             log.debug('Empty documents: %s' % self.doc_type)
             return
-
         documents_actions = self.prep_bulk_documents(action, documents)
-
         if documents_actions:
             operation = partial(_bulk_body, request=request)
             self.process_chunks(
