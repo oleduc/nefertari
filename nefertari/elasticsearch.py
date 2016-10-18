@@ -272,20 +272,29 @@ class ESActionRegistry(metaclass=SingletonMeta):
 
     def transaction_hook(self, success, transaction):
         if success:
-            failed_actions = []
-            for action in self.registry[transaction]:
+            self.force_indexation(transaction)
+
+    def force_indexation(self, transaction=None):
+        failed_actions = []
+
+        if transaction:
+            actions = self.registry[transaction]
+            del self.registry[transaction]
+        else:
+            actions = [action for actions in self.registry.values() for action in actions]
+            self.registry.clear()
+
+        for action in actions:
+            successful, error = action()
+            # retry if indexation failed because of concurrency conflicts
+            if isinstance(error, ConflictError) or isinstance(error, helpers.BulkIndexError):
                 successful, error = action()
-                # retry if indexation failed because of concurrency conflicts
-                if isinstance(error, ConflictError) or isinstance(error, helpers.BulkIndexError):
-                    successful, error = action()
 
-                if not successful:
-                    # handle failed action, maybe schedule reindex round
-                    failed_actions.append((action, error))
-                if failed_actions:
-                    raise ESBulkException([error for action, error in failed_actions])
-
-        del self.registry[transaction]
+            if not successful:
+                # handle failed action, maybe schedule reindex round
+                failed_actions.append((action, error))
+            if failed_actions:
+                raise ESBulkException([error for action, error in failed_actions])
 
 
 class ESBulkException(ElasticsearchException):

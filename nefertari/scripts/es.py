@@ -7,7 +7,7 @@ from pyramid.config import Configurator
 from six.moves import urllib
 
 from nefertari.utils import dictset, split_strip, to_dicts, to_indexable_dicts
-from nefertari.elasticsearch import ES, create_index_with_settings
+from nefertari.elasticsearch import ES, ESActionRegistry, create_index_with_settings
 from nefertari import engine
 
 
@@ -108,6 +108,7 @@ class ESCommand(object):
             self.log.info('Indexing missing `{}` documents'.format(
                 model_name))
             es.index_missing_documents(documents)
+            ESActionRegistry().force_indexation()
 
     def recreate_index(self):
         self.log.info('Deleting index')
