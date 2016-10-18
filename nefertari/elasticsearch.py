@@ -71,11 +71,18 @@ def includeme(config):
     Settings = dictset(config.registry.settings)
     ES.setup(Settings)
 
+    create_index_with_settings(Settings)
+
+    if ES.settings.asbool('enable_polymorphic_query'):
+        config.include('nefertari.polymorphic')
+
+
+def create_index_with_settings(settings):
     # Load custom index settings
     index_settings = None
     index_settings_path = None
-    if "elasticsearch.index.settings_file" in Settings:
-        index_settings_path = Settings["elasticsearch.index.settings_file"]
+    if "elasticsearch.index.settings_file" in settings:
+        index_settings_path = settings["elasticsearch.index.settings_file"]
 
         if not os.path.exists(index_settings_path):
             raise Exception("Custom index settings file does not exist : '{file_name}'".format(
@@ -95,8 +102,6 @@ def includeme(config):
                 ))
 
     ES.create_index(index_settings=index_settings)
-    if ES.settings.asbool('enable_polymorphic_query'):
-        config.include('nefertari.polymorphic')
 
 
 def _bulk_body(documents_actions, request):
