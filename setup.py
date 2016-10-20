@@ -12,7 +12,7 @@ install_requires = [
     'requests',
     'nefertari-sqla',
     'simplejson',
-    'elasticsearch',
+    'elasticsearch==2.4.0',
     'blinker',
     'zope.dottedname',
     'cryptacular',
