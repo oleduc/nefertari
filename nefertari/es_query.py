@@ -137,8 +137,14 @@ def _build_es_query(values):
     return aggregation
 
 
-# add term to existed aggregation
 def _attach_item(item, aggregation, operation):
+    """
+    attach item to already existed operation in aggregation or to new operation in aggregation
+    :param item: string
+    :param aggregation: dict which contains aggregated terms
+    :param operation: ES operation keywords {must, must_not, should, should_not}
+    :return:
+    """
 
     if item is None:
         return
