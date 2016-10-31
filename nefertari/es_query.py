@@ -7,15 +7,26 @@ class OperationStack(list):
         return self.es_keywords[super(OperationStack, self).pop()]
 
 
-def compile_es_query(query_string):
+def compile_es_query(params):
+    query_string = params.pop('es_q')
+    # compile params as "AND conditions" on the top level of query_string
+    for key, value in params.items():
+        if key.startswith('_'):
+            continue
+        else:
+            query_string += ' AND '
+            query_string += ':'.join([key, value])
+
     query_string = _parse_nested_items(query_string)
     query_tokens = _get_tokens(query_string)
+
     if len(query_tokens) > 1:
         tree = _build_tree(query_tokens)
         return {'bool': _build_es_query(tree)}
     return {'bool': {'must': [_parse_term(query_string)]}}
 
 
+# split query string to tokens "(", ")", "field:value", "AND", "AND NOT", "OR", "OR NOT"
 def _get_tokens(values):
 
     tokens = []
@@ -110,28 +121,42 @@ def _build_es_query(values):
             keyword_exists = aggregation.get(operation, False)
 
             if keyword_exists:
-                if _is_nested(value2):
-                    _attach_nested(value, aggregation, operation)
-                elif isinstance(value2, dict):
-                    aggregation[operation].append(value2)
-                else:
-                    aggregation[operation].append(_parse_term(value2))
+                _attach_item(value2, aggregation, operation)
             else:
-                aggregation[operation] = []
-
-                for item in filter(lambda x: x is not None, [value1, value2]):
-                    if _is_nested(item):
-                        _attach_nested(item, aggregation, operation)
-                    elif isinstance(item, dict):
-                        aggregation[operation].append(item)
-                    else:
-                        aggregation[operation].append(_parse_term(item))
+                if operation == 'should_not':
+                    _attach_item(value1, aggregation, 'should')
+                    _attach_item(value2, aggregation, operation)
+                elif operation == 'must_not':
+                    _attach_item(value1, aggregation, 'must')
+                    _attach_item(value2, aggregation, operation)
+                else:
+                    for item in filter(lambda x: x is not None, [value1, value2]):
+                        _attach_item(item, aggregation, operation)
 
             values_stack.append(None)
 
     return aggregation
 
 
+# add term to existed aggregation
+def _attach_item(item, aggregation, operation):
+
+    if item is None:
+        return
+
+    # init value or get exists
+    aggregation[operation] = aggregation[operation] if len(aggregation.get(operation, [])) else []
+
+    if _is_nested(item):
+        _attach_nested(item, aggregation, operation)
+    elif isinstance(item, dict):
+        aggregation[operation].append(item)
+    else:
+        aggregation[operation].append(_parse_term(item))
+
+
+# parse term, on this level can be implemented rules according to range, term, match and others
+# https://www.elastic.co/guide/en/elasticsearch/reference/2.1/term-level-queries.html
 def _parse_term(item):
     field, value = item.split(':')
     if value == '_missing_':
@@ -140,6 +165,7 @@ def _parse_term(item):
     return {'term': {field: value}}
 
 
+# attach _nested to nested_document
 def _parse_nested_items(query_string):
     parsed_query_string = ''
     in_quotes = False
@@ -166,16 +192,18 @@ def _is_nested(item):
     return False
 
 
+# rules related to nested queries
+# https://www.elastic.co/guide/en/elasticsearch/guide/current/nested-query.html
 def _attach_nested(value, aggregation, operation):
     field, value = value.split(':')
     path = field.split('.')[0]
     existed_items = aggregation[operation]
-
+    invert_operation = {'must': 'must', 'must_not': 'must', 'should_not': 'should', 'should': 'should'}
     for item in existed_items:
         if 'nested' in item:
             item_path = item['nested'].get('path', False)
             if item_path == path:
-                item['nested']['query']['bool'][operation].append({'term': {field: value}})
+                item['nested']['query']['bool'][invert_operation[operation]].append({'term': {field: value}})
                 break
     else:
-        existed_items.append({'nested': {'path': path, 'query': {'bool': {operation: [{'term': {field: value}}]}}}})
+        existed_items.append({'nested': {'path': path, 'query': {'bool': {invert_operation[operation]: [{'term': {field: value}}]}}}})

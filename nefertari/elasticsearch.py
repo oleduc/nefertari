@@ -782,8 +782,7 @@ class ES(object):
 
         if 'es_q' in params:
             if 'query' in _params['body']:
-                query_string = params.pop('es_q')
-                _params['body']['query'] = compile_es_query(query_string)
+                _params['body']['query'] = compile_es_query(params)
 
         if '_sort' in params and self.proxy:
             params['_sort'] = substitute_nested_terms(params['_sort'], self.proxy.substitutions)
@@ -816,6 +815,7 @@ class ES(object):
             if isinstance(current_qs, str):
                 _params['body']['query']['query_string'] = {'query': current_qs}
             _params['body']['query']['query_string']['fields'] = search_fields
+        import ipdb; ipdb.set_trace()
         return _params
 
     def do_count(self, params):
