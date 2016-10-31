@@ -56,9 +56,12 @@ class TestESQueryCompilation(object):
         params = {'es_q': query_string}
         result = compile_es_query(params)
 
-        assert result == {'bool': {''
-                                   'must_not': [{'nested': {'path': 'assignments_nested', 'query': {'bool': {'must': [{'term': {'assignments_nested.assignor_id': 'someusesaqk'}}]}}}}],
-                                   'must': [{'nested': {'path': 'assignments_nested', 'query': {'bool': {'must': [{'term': {'assignments_nested.assignee_id': 'someuse'}}, {'term': {'assignments_nested.is_completed': 'true'}}]}}}}]}}
+        assert result == {'bool': {
+            'must_not': [{'nested': {'path': 'assignments_nested', 'query': {'bool': {
+                'must': [{'term': {'assignments_nested.assignor_id': 'someusesaqk'}}]}}}}],
+            'must': [{'nested': {'path': 'assignments_nested', 'query': {'bool': {
+                'must': [{'term': {'assignments_nested.assignee_id': 'someuse'}},
+                         {'term': {'assignments_nested.is_completed': 'true'}}]}}}}]}}
 
 
     def test_nested_query_inside_query(self):
@@ -68,12 +71,15 @@ class TestESQueryCompilation(object):
         assert result == {'bool': {
             'should': [{'bool': {
                         'must': [
-                            {'nested': {'query': {'bool': {'must': [{'term': {'assignments_nested.assignor_id': 'another'}}]}},'path': 'assignments_nested'}}],
+                            {'nested': {'query': {'bool': {
+                                'must': [{'term': {'assignments_nested.assignor_id': 'another'}}]}},
+                                'path': 'assignments_nested'}}],
                         'should': [
                             {'nested': {'query': {'bool': {
-                                'should': [{'term': {'assignments_nested.assignee_id': 'someuser'}}, {'term': {'assignments_nested.is_completed': 'false'}}]}}, 'path': 'assignments_nested'}}]
-                        }},
-                      {'term': {'owner_id': 'someuser'}}]}}
+                                'should': [{'term': {'assignments_nested.assignee_id': 'someuser'}},
+                                           {'term': {'assignments_nested.is_completed': 'false'}}]}},
+                                'path': 'assignments_nested'}}]
+                        }}, {'term': {'owner_id': 'someuser'}}]}}
 
     def test_very_complicated_query(self):
         query_string = '((assignments.assignee_id:someuser OR assignments.is_completed:false) ' \
@@ -83,19 +89,24 @@ class TestESQueryCompilation(object):
         params = {'es_q': query_string}
         result = compile_es_query(params)
         assert result == {'bool': {'should':
-                                       [{'bool':
-                                             {'should': [{'bool':
-                                                              {'should': [{'nested': {'query': {'bool': {
-                                                                  'should': [{'term': {'assignments_nested.assignee_id': 'someuser'}},
-                                                                                                                    {'term': {'assignments_nested.is_completed': 'false'}}]}},
-                                                                                      'path': 'assignments_nested'}}]}},
-                                                         {'bool':
-                                                              {'must': [{'term': {'value': 'true'}},
-                                                                            {'term': {'another': 'false'}},
-                                                                            {'bool': {'must_not': [{'term': {'field': 'true'}}],
-                                                                                      'must': [{'term': {'some': 'true'}}]}}]}}],
-                                              'must_not': [{'bool': {
-                                                  'should': [{'term': {'complicated': 'true'}}],
-                                                  'should_not': [{'term': {'complicated': 'false'}}]}}]}},
-                                        {'term': {'owner_id': 'someuser'}}], 'must_not': [{'term': {'completed': 'false'}}]}}
-
+            [{'bool':
+                {
+                    'should': [{'bool':
+                        {
+                            'should': [{'nested': {'query': {'bool': {
+                                'should': [{'term': {'assignments_nested.assignee_id': 'someuser'}},
+                                           {'term': {
+                                               'assignments_nested.is_completed': 'false'}}]}},
+                                'path': 'assignments_nested'}}]}},
+                        {'bool':
+                            {
+                                'must': [{'term': {'value': 'true'}},
+                                         {'term': {'another': 'false'}},
+                                         {'bool': {
+                                             'must_not': [{'term': {'field': 'true'}}],
+                                             'must': [{'term': {'some': 'true'}}]}}]}}],
+                    'must_not': [{'bool': {
+                        'should': [{'term': {'complicated': 'true'}}],
+                        'should_not': [{'term': {'complicated': 'false'}}]}}]}},
+                {'term': {'owner_id': 'someuser'}}],
+            'must_not': [{'term': {'completed': 'false'}}]}}
