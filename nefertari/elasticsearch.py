@@ -780,9 +780,9 @@ class ES(object):
             params.get('_page', None),
             params['_limit'])
 
-        if '_es_q' in params:
+        if 'es_q' in params:
             if 'query' in _params['body']:
-                query_string = params.pop('_es_q')
+                query_string = params.pop('es_q')
                 _params['body']['query'] = compile_es_query(query_string)
 
         if '_sort' in params and self.proxy:
