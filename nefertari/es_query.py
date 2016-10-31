@@ -29,9 +29,9 @@ def compile_es_query(params):
 def _get_tokens(values):
 
     tokens = []
-    brackets = ['(', ')']
+    brackets = {'(', ')'}
     buffer = ''
-    keywords = ['AND', 'OR']
+    keywords = {'AND', 'OR'}
 
     for item in values:
 
@@ -63,9 +63,9 @@ def _get_tokens(values):
 def _build_tree(tokens):
 
     class Node:
-        def __init__(self, prev=None, next=None):
+        def __init__(self, prev=None, next_=None):
             self.prev = prev
-            self.next = next
+            self.next = next_
             self.values = []
 
         def parse(self):
@@ -97,7 +97,7 @@ def _build_es_query(values):
     aggregation = {}
     operations_stack = OperationStack()
     values_stack = []
-    keywords = ['AND', 'AND NOT', 'OR', 'OR NOT']
+    keywords = {'AND', 'AND NOT', 'OR', 'OR NOT'}
 
     for value in values:
         if value in keywords:
@@ -144,7 +144,7 @@ def _attach_item(item, aggregation, operation):
         return
 
     # init value or get existed
-    aggregation[operation] = aggregation[operation] if len(aggregation.get(operation, [])) else []
+    aggregation[operation] = aggregation.get(operation, [])
 
     if _is_nested(item):
         _attach_nested(item, aggregation, operation)
@@ -154,9 +154,14 @@ def _attach_item(item, aggregation, operation):
         aggregation[operation].append(_parse_term(item))
 
 
-# parse term, on this level can be implemented rules according to range, term, match and others
-# https://www.elastic.co/guide/en/elasticsearch/reference/2.1/term-level-queries.html
 def _parse_term(item):
+    """
+    parse term, on this level can be implemented rules according to range, term, match and others
+    https://www.elastic.co/guide/en/elasticsearch/reference/2.1/term-level-queries.html
+    :param item: string
+    :return: dict which contains {'term': {field_name: field_value}
+    """
+
     field, value = item.split(':')
     if '|' in value:
         values = value.split('|')
@@ -167,8 +172,12 @@ def _parse_term(item):
     return {'term': {field: value}}
 
 
-# attach _nested to nested_document
 def _parse_nested_items(query_string):
+    """
+    attach _nested to nested_document
+    :param query_string: string
+    :return: string with updated name for nested document, like assignments_nested for assignments
+    """
     parsed_query_string = ''
     in_quotes = False
     for index, key in enumerate(query_string):
@@ -194,9 +203,16 @@ def _is_nested(item):
     return False
 
 
-# rules related to nested queries
-# https://www.elastic.co/guide/en/elasticsearch/guide/current/nested-query.html
 def _attach_nested(value, aggregation, operation):
+    """
+    apply rules related to nested queries
+    https://www.elastic.co/guide/en/elasticsearch/guide/current/nested-query.html
+    :param value: string
+    :param aggregation: dict which contains aggregated terms
+    :param operation: ES operation keywords {must, must_not, should, should_not}
+    :return: None
+    """
+
     field, value = value.split(':')
     path = field.split('.')[0]
     existed_items = aggregation[operation]
