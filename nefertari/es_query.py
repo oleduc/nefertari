@@ -16,7 +16,6 @@ def compile_es_query(params):
         else:
             query_string += ' AND '
             query_string += ':'.join([key, value])
-
     query_string = _parse_nested_items(query_string)
     query_tokens = _get_tokens(query_string)
 
@@ -130,7 +129,7 @@ def _build_es_query(values):
                     _attach_item(value1, aggregation, 'must')
                     _attach_item(value2, aggregation, operation)
                 else:
-                    for item in filter(lambda x: x is not None, [value1, value2]):
+                    for item in [value1, value2]:
                         _attach_item(item, aggregation, operation)
 
             values_stack.append(None)
@@ -159,6 +158,9 @@ def _attach_item(item, aggregation, operation):
 # https://www.elastic.co/guide/en/elasticsearch/reference/2.1/term-level-queries.html
 def _parse_term(item):
     field, value = item.split(':')
+    if '|' in value:
+        values = value.split('|')
+        return {'bool': {'should': [{'term': {field: value}} for value in values]}}
     if value == '_missing_':
         return {'missing': {'field': field}}
 

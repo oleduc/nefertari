@@ -815,7 +815,6 @@ class ES(object):
             if isinstance(current_qs, str):
                 _params['body']['query']['query_string'] = {'query': current_qs}
             _params['body']['query']['query_string']['fields'] = search_fields
-        import ipdb; ipdb.set_trace()
         return _params
 
     def do_count(self, params):
