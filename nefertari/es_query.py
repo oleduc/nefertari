@@ -18,19 +18,23 @@ def compile_es_query(params):
             query_string += ':'.join([key, value])
     query_string = _parse_nested_items(query_string)
     query_tokens = _get_tokens(query_string)
+
     if len(query_tokens) > 1:
         tree = _build_tree(query_tokens)
         return {'bool': _build_es_query(tree)}
     return {'bool': {'must': [_parse_term(query_string)]}}
 
 
-# split query string to tokens "(", ")", "field:value", "AND", "AND NOT", "OR", "OR NOT"
 def _get_tokens(values):
-
+    """
+    split query string to tokens "(", ")", "field:value", "AND", "AND NOT", "OR", "OR NOT"
+    :param values: string
+    :return: array of tokens
+    """
     tokens = []
-    brackets = ['(', ')']
+    brackets = {'(', ')'}
     buffer = ''
-    keywords = ['AND', 'OR']
+    keywords = {'AND', 'OR'}
     in_term = False
 
     for item in values:
@@ -69,9 +73,9 @@ def _get_tokens(values):
 def _build_tree(tokens):
 
     class Node:
-        def __init__(self, prev=None, next=None):
+        def __init__(self, prev=None, next_=None):
             self.prev = prev
-            self.next = next
+            self.next = next_
             self.values = []
 
         def parse(self):
@@ -103,10 +107,10 @@ def _build_es_query(values):
     aggregation = {}
     operations_stack = OperationStack()
     values_stack = []
-    keywords = ['AND', 'AND NOT', 'OR', 'OR NOT']
+    keywords = {'AND', 'AND NOT', 'OR', 'OR NOT'}
 
     for value in values:
-        if value in keywords:
+        if isinstance(value, str) and value in keywords:
             operations_stack.append(value)
         else:
             values_stack.append(value)
@@ -143,14 +147,20 @@ def _build_es_query(values):
     return aggregation
 
 
-# add term to existed aggregation
 def _attach_item(item, aggregation, operation):
+    """
+    attach item to already existed operation in aggregation or to new operation in aggregation
+    :param item: string
+    :param aggregation: dict which contains aggregated terms
+    :param operation: ES operation keywords {must, must_not, should, should_not}
+    :return:
+    """
 
     if item is None:
         return
 
     # init value or get existed
-    aggregation[operation] = aggregation[operation] if len(aggregation.get(operation, [])) else []
+    aggregation[operation] = aggregation.get(operation, [])
 
     if _is_nested(item):
         _attach_nested(item, aggregation, operation)
@@ -160,9 +170,14 @@ def _attach_item(item, aggregation, operation):
         aggregation[operation].append(_parse_term(item))
 
 
-# parse term, on this level can be implemented rules according to range, term, match and others
-# https://www.elastic.co/guide/en/elasticsearch/reference/2.1/term-level-queries.html
 def _parse_term(item):
+    """
+    parse term, on this level can be implemented rules according to range, term, match and others
+    https://www.elastic.co/guide/en/elasticsearch/reference/2.1/term-level-queries.html
+    :param item: string
+    :return: dict which contains {'term': {field_name: field_value}
+    """
+
     field, value = smart_split(item)
     if '|' in value:
         values = value.split('|')
@@ -189,6 +204,11 @@ def _parse_range(field, value):
 
 # attach _nested to nested_document
 def _parse_nested_items(query_string):
+    """
+    attach _nested to nested_document
+    :param query_string: string
+    :return: string with updated name for nested document, like assignments_nested for assignments
+    """
     parsed_query_string = ''
     in_quotes = False
     for index, key in enumerate(query_string):
@@ -223,9 +243,15 @@ def smart_split(item, split_key=':'):
     return [item[0:split_index], item[split_index + 1:]]
 
 
-# rules related to nested queries
-# https://www.elastic.co/guide/en/elasticsearch/guide/current/nested-query.html
 def _attach_nested(value, aggregation, operation):
+    """
+    apply rules related to nested queries
+    https://www.elastic.co/guide/en/elasticsearch/guide/current/nested-query.html
+    :param value: string
+    :param aggregation: dict which contains aggregated terms
+    :param operation: ES operation keywords {must, must_not, should, should_not}
+    :return: None
+    """
     field, _ = smart_split(value)
     path = field.split('.')[0]
     existed_items = aggregation[operation]
