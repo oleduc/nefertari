@@ -1,6 +1,4 @@
 
-{"bool": {"must": [{"nested": {"query": {"bool": {"must": [{"range": {"schedules_nested.end_date": {"lte": "2016-10-18T02:59:59", "gte": "2016-10-11T03:00:00"}}}, {"term": {"schedules_nested.obj_status": "active"}}]}}, "path": "schedules_nested"}}]}}
-
 
 class OperationStack(list):
     es_keywords = {'AND': 'must', 'OR': 'should', 'AND NOT': 'must_not', 'OR NOT': 'should_not'}
