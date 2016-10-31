@@ -191,11 +191,13 @@ def _parse_term(item):
 
 def _parse_range(field, value):
     """
-    convert date range to ES range query
+    convert date range to ES range query.
+    https://www.elastic.co/guide/en/elasticsearch/reference/2.1/query-dsl-range-query.html
     :param field: string, searched field name
     :param value: string, date range, example [2016-07-10T00:00:00 TO 2016-08-10T01:00:00]
-    :return:
+    :return: dict, {'range': {field_name: {'gte': 2016-07-10T00:00:00, 'lte': 2016-08-10T01:00:00}}
     """
+
     from_, to = list(map(lambda string: string.strip(), value.split('TO')))
     range_ = {'range': {field: {}}}
 
