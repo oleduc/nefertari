@@ -143,7 +143,7 @@ def _attach_item(item, aggregation, operation):
     if item is None:
         return
 
-    # init value or get exists
+    # init value or get existed
     aggregation[operation] = aggregation[operation] if len(aggregation.get(operation, [])) else []
 
     if _is_nested(item):
