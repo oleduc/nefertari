@@ -190,6 +190,12 @@ def _parse_term(item):
 
 
 def _parse_range(field, value):
+    """
+    convert date range to ES range query
+    :param field: string, searched field name
+    :param value: string, date range, example [2016-07-10T00:00:00 TO 2016-08-10T01:00:00]
+    :return:
+    """
     from_, to = list(map(lambda string: string.strip(), value.split('TO')))
     range_ = {'range': {field: {}}}
 
@@ -235,6 +241,12 @@ def _is_nested(item):
 
 
 def smart_split(item, split_key=':'):
+    """
+    split string in first matching with key
+    :param item: string which contain field_name:value or field_name:[00:00:00 TO 01:00:00]
+    :param split_key: key, which we use to split string
+    :return:
+    """
     split_index = -1
     for index, key in enumerate(item):
         if key == split_key:
