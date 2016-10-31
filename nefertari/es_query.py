@@ -25,9 +25,12 @@ def compile_es_query(params):
     return {'bool': {'must': [_parse_term(query_string)]}}
 
 
-# split query string to tokens "(", ")", "field:value", "AND", "AND NOT", "OR", "OR NOT"
 def _get_tokens(values):
-
+    """
+    split query string to tokens "(", ")", "field:value", "AND", "AND NOT", "OR", "OR NOT"
+    :param values: string
+    :return: array of tokens
+    """
     tokens = []
     brackets = {'(', ')'}
     buffer = ''
@@ -100,7 +103,7 @@ def _build_es_query(values):
     keywords = {'AND', 'AND NOT', 'OR', 'OR NOT'}
 
     for value in values:
-        if value in keywords:
+        if isinstance(value, str) and value in keywords:
             operations_stack.append(value)
         else:
             values_stack.append(value)
