@@ -1,4 +1,6 @@
 
+{"bool": {"must": [{"nested": {"query": {"bool": {"must": [{"range": {"schedules_nested.end_date": {"lte": "2016-10-18T02:59:59", "gte": "2016-10-11T03:00:00"}}}, {"term": {"schedules_nested.obj_status": "active"}}]}}, "path": "schedules_nested"}}]}}
+
 
 class OperationStack(list):
     es_keywords = {'AND': 'must', 'OR': 'should', 'AND NOT': 'must_not', 'OR NOT': 'should_not'}
@@ -18,7 +20,6 @@ def compile_es_query(params):
             query_string += ':'.join([key, value])
     query_string = _parse_nested_items(query_string)
     query_tokens = _get_tokens(query_string)
-
     if len(query_tokens) > 1:
         tree = _build_tree(query_tokens)
         return {'bool': _build_es_query(tree)}
@@ -32,10 +33,17 @@ def _get_tokens(values):
     brackets = ['(', ')']
     buffer = ''
     keywords = ['AND', 'OR']
+    in_term = False
 
     for item in values:
 
-        if item == ' ' and buffer:
+        if item == '[':
+            in_term = True
+
+        if item == ']':
+            in_term = False
+
+        if item == ' ' and buffer and not in_term:
             if buffer == 'NOT':
                 tmp = tokens.pop()
                 # check for avoid issue with "field_name:NOT blabla"
@@ -157,14 +165,28 @@ def _attach_item(item, aggregation, operation):
 # parse term, on this level can be implemented rules according to range, term, match and others
 # https://www.elastic.co/guide/en/elasticsearch/reference/2.1/term-level-queries.html
 def _parse_term(item):
-    field, value = item.split(':')
+    field, value = smart_split(item)
     if '|' in value:
         values = value.split('|')
         return {'bool': {'should': [{'term': {field: value}} for value in values]}}
     if value == '_missing_':
         return {'missing': {'field': field}}
-
+    if value.startswith('[') and value.endswith(']'):
+        return _parse_range(field, value[1:len(value) - 1])
     return {'term': {field: value}}
+
+
+def _parse_range(field, value):
+    from_, to = list(map(lambda string: string.strip(), value.split('TO')))
+    range_ = {'range': {field: {}}}
+
+    if from_ != '_missing_':
+        range_['range'][field].update({'gte': from_})
+
+    if to != '_missing_':
+        range_['range'][field].update({'lte': to})
+
+    return range_
 
 
 # attach _nested to nested_document
@@ -189,23 +211,35 @@ def _parse_nested_items(query_string):
 
 def _is_nested(item):
     if isinstance(item, str):
-        field, _ = item.split(':')
+        field, _ = smart_split(item)
         return '_nested' in field
     return False
+
+
+def smart_split(item, split_key=':'):
+    split_index = -1
+    for index, key in enumerate(item):
+        if key == split_key:
+            split_index = index
+            break
+    return [item[0:split_index], item[split_index + 1:]]
 
 
 # rules related to nested queries
 # https://www.elastic.co/guide/en/elasticsearch/guide/current/nested-query.html
 def _attach_nested(value, aggregation, operation):
-    field, value = value.split(':')
+    field, _ = smart_split(value)
     path = field.split('.')[0]
     existed_items = aggregation[operation]
-    invert_operation = {'must': 'must', 'must_not': 'must', 'should_not': 'should', 'should': 'should'}
+    invert_operation = {'must': 'must', 'must_not': 'must',
+                        'should_not': 'should', 'should': 'should'}
     for item in existed_items:
         if 'nested' in item:
             item_path = item['nested'].get('path', False)
             if item_path == path:
-                item['nested']['query']['bool'][invert_operation[operation]].append({'term': {field: value}})
+                item['nested']['query']['bool'][invert_operation[operation]]\
+                    .append(_parse_term(value))
                 break
     else:
-        existed_items.append({'nested': {'path': path, 'query': {'bool': {invert_operation[operation]: [{'term': {field: value}}]}}}})
+        existed_items.append({'nested': {
+            'path': path, 'query': {'bool': {invert_operation[operation]: [_parse_term(value)]}}}})

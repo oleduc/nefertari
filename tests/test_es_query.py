@@ -56,10 +56,15 @@ class TestESQueryCompilation(object):
         params = {'es_q': query_string}
         result = compile_es_query(params)
 
-        assert result == {'bool': {''
-                                   'must_not': [{'nested': {'path': 'assignments_nested', 'query': {'bool': {'must': [{'term': {'assignments_nested.assignor_id': 'someusesaqk'}}]}}}}],
-                                   'must': [{'nested': {'path': 'assignments_nested', 'query': {'bool': {'must': [{'term': {'assignments_nested.assignee_id': 'someuse'}}, {'term': {'assignments_nested.is_completed': 'true'}}]}}}}]}}
-
+        assert result == {'bool': {
+            'must_not': [{'nested': {'path': 'assignments_nested', 'query': {'bool': {
+                'must': [{'term': {'assignments_nested.assignor_id': 'someusesaqk'}}]}}}}],
+            'must': [{'nested': {'path': 'assignments_nested', 'query': {
+                'bool': {
+                    'must': [
+                        {'term': {'assignments_nested.assignee_id': 'someuse'}},
+                        {'term': {
+                            'assignments_nested.is_completed': 'true'}}]}}}}]}}
 
     def test_nested_query_inside_query(self):
         query_string = '(assignments.assignee_id:someuser OR assignments.is_completed:false AND assignments.assignor_id:another) OR owner_id:someuser'
@@ -67,13 +72,17 @@ class TestESQueryCompilation(object):
         result = compile_es_query(params)
         assert result == {'bool': {
             'should': [{'bool': {
-                        'must': [
-                            {'nested': {'query': {'bool': {'must': [{'term': {'assignments_nested.assignor_id': 'another'}}]}},'path': 'assignments_nested'}}],
-                        'should': [
-                            {'nested': {'query': {'bool': {
-                                'should': [{'term': {'assignments_nested.assignee_id': 'someuser'}}, {'term': {'assignments_nested.is_completed': 'false'}}]}}, 'path': 'assignments_nested'}}]
-                        }},
-                      {'term': {'owner_id': 'someuser'}}]}}
+                'must': [
+                    {'nested': {'query': {'bool': {
+                        'must': [{'term': {'assignments_nested.assignor_id': 'another'}}]}},
+                                'path': 'assignments_nested'}}],
+                'should': [
+                    {'nested': {'query': {'bool': {
+                        'should': [{'term': {'assignments_nested.assignee_id': 'someuser'}},
+                                   {'term': {'assignments_nested.is_completed': 'false'}}]}},
+                        'path': 'assignments_nested'}}]
+            }},
+                {'term': {'owner_id': 'someuser'}}]}}
 
     def test_very_complicated_query(self):
         query_string = '((assignments.assignee_id:someuser OR assignments.is_completed:false) ' \
@@ -82,20 +91,88 @@ class TestESQueryCompilation(object):
                        'OR owner_id:someuser AND NOT completed:false'
         params = {'es_q': query_string}
         result = compile_es_query(params)
-        assert result == {'bool': {'should':
-                                       [{'bool':
-                                             {'should': [{'bool':
-                                                              {'should': [{'nested': {'query': {'bool': {
-                                                                  'should': [{'term': {'assignments_nested.assignee_id': 'someuser'}},
-                                                                                                                    {'term': {'assignments_nested.is_completed': 'false'}}]}},
-                                                                                      'path': 'assignments_nested'}}]}},
-                                                         {'bool':
-                                                              {'must': [{'term': {'value': 'true'}},
-                                                                            {'term': {'another': 'false'}},
-                                                                            {'bool': {'must_not': [{'term': {'field': 'true'}}],
-                                                                                      'must': [{'term': {'some': 'true'}}]}}]}}],
-                                              'must_not': [{'bool': {
-                                                  'should': [{'term': {'complicated': 'true'}}],
-                                                  'should_not': [{'term': {'complicated': 'false'}}]}}]}},
-                                        {'term': {'owner_id': 'someuser'}}], 'must_not': [{'term': {'completed': 'false'}}]}}
+        assert result == {'bool': {
+            'should':
+                [{
+                    'bool':
+                        {
+                            'should': [{'bool':
+                                {
+                                    'should': [{'nested': {'query': {'bool': {
+                                        'should': [{'term': {
+                                            'assignments_nested.assignee_id': 'someuser'}},
+                                                   {'term': {
+                                                       'assignments_nested.is_completed': 'false'}}]}},
+                                        'path': 'assignments_nested'}}]}},
+                                {'bool':
+                                    {
+                                        'must': [{'term': {'value': 'true'}},
+                                                 {'term': {'another': 'false'}},
+                                                 {'bool': {
+                                                     'must_not': [{'term': {'field': 'true'}}],
 
+                                                     'must': [{'term': {'some': 'true'}}]}}]}}],
+                            'must_not': [{'bool': {
+                                'should': [{'term': {'complicated': 'true'}}],
+                                'should_not': [{'term': {'complicated': 'false'}}]}}]}},
+                    {'term': {'owner_id': 'someuser'}}],
+            'must_not': [{'term': {'completed': 'false'}}]}}
+
+    def test_range_query_nested(self):
+        query_string = 'schedules.end_date:[2016-10-11T03:00:00 TO 2016-10-18T02:59:59] AND schedules.obj_status:active'
+        params = {'es_q': query_string}
+        result = compile_es_query(params)
+        assert result == {'bool': {
+            'must': [{'nested': {'query': {'bool': {
+                'must': [{
+                    'range': {'schedules_nested.end_date': {
+                        'lte': '2016-10-18T02:59:59',
+                        'gte': '2016-10-11T03:00:00'}}},
+                    {
+                        'term': {'schedules_nested.obj_status': 'active'}}]}},
+                'path': 'schedules_nested'}}]}}
+
+    def test_range_query(self):
+        query_string = '(x:[2016-10-11T03:00:00 TO 2016-10-18T02:59:59] OR z:[2016-10-11T03:00:00 TO 2016-10-18T02:59:59]) AND (schedules.end_date:[2016-10-11T03:00:00 TO 2016-10-18T02:59:59] AND schedules.obj_status:active)'
+        params = {'es_q': query_string}
+        result = compile_es_query(params)
+        assert result == {'bool': {
+            'must': [{
+                'bool': {
+                    'should': [{
+                        'range': {'x': {
+                            'gte': '2016-10-11T03:00:00',
+                            'lte': '2016-10-18T02:59:59'}}}, {
+                        'range': {'z': {
+                            'gte': '2016-10-11T03:00:00',
+                            'lte': '2016-10-18T02:59:59'}}}]}}, {
+                'bool': {
+                    'must': [{
+                        'nested': {'query': {'bool': {
+                            'must': [{
+                                'range': {'schedules_nested.end_date': {
+                                    'gte': '2016-10-11T03:00:00',
+                                    'lte': '2016-10-18T02:59:59'}}},
+                                {'term': {'schedules_nested.obj_status': 'active'}}]}},
+                            'path': 'schedules_nested'}}]}}]}}
+
+    def test_range_query_with_missed_from_and_to(self):
+        query_string = '(x:[_missing_ TO 2016-10-18T02:59:59] OR z:[_missing_ TO 2016-10-18T02:59:59]) AND (schedules.end_date:[2016-10-11T03:00:00 TO _missing_] AND schedules.obj_status:active)'
+        params = {'es_q': query_string}
+        result = compile_es_query(params)
+        assert result == {'bool': {
+            'must': [{
+                'bool': {
+                    'should': [{
+                        'range': {'x': {
+                            'lte': '2016-10-18T02:59:59'}}}, {
+                        'range': {'z': {
+                            'lte': '2016-10-18T02:59:59'}}}]}}, {
+                'bool': {
+                    'must': [{
+                        'nested': {'query': {'bool': {
+                            'must': [{
+                                'range': {'schedules_nested.end_date': {
+                                    'gte': '2016-10-11T03:00:00'}}},
+                                {'term': {'schedules_nested.obj_status': 'active'}}]}},
+                            'path': 'schedules_nested'}}]}}]}}
