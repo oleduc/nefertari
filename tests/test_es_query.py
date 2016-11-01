@@ -11,26 +11,39 @@ class TestESQueryCompilation(object):
                                              'AND NOT', '(', 'item:OR', 'OR NOT', 'item:NOT',
                                              ')', ')', 'OR', 'true:true']
 
+    def test_remove_top_level_brackets_if_needless(self):
+        query_string = '(item:value OR item:value)'
+        tokens = _get_tokens(query_string)
+        tree = _build_tree(tokens)
+        assert ['item:value', 'OR', 'item:value'] == tree
+
     def test_build_tree(self):
         query_string = '(item:value OR item:value) AND ((item:value OR item:value AND complicated:false) OR (item:value OR item:value))'
         tokens = _get_tokens(query_string)
+        tree = _build_tree(tokens)
         assert [['item:value', 'OR', 'item:value'], 'AND',
                 [['item:value', 'OR', 'item:value', 'AND', 'complicated:false'], 'OR',
-                 ['item:value', 'OR', 'item:value']]] == _build_tree(tokens)
+                 ['item:value', 'OR', 'item:value']]] == tree
 
     def test_nested_query(self):
         query_string = 'assignments.assignee_id:someuse'
         params = {'es_q': query_string}
         result = compile_es_query(params)
-        assert result == {
-            'bool': {'must': [{'term': {'assignments_nested.assignee_id': 'someuse'}}]}}
+        print(result)
+        assert result == {'bool': {
+            'must': [{
+                'nested': {'query': {'bool': {
+                    'must': [{'term': {'assignments_nested.assignee_id': 'someuse'}}]}},
+                    'path': 'assignments_nested'}}]}}
 
     def test_nested_query_with_quotes(self):
         query_string = 'assignments.assignee_id:"someuse.user.@b.a.b.la."'
         params = {'es_q': query_string}
         result = compile_es_query(params)
         assert result == {'bool': {
-            'must': [{'term': {'assignments_nested.assignee_id': 'someuse.user.@b.a.b.la.'}}]}}
+            'must': [{'nested': {'path': 'assignments_nested', 'query': {'bool': {
+                'must': [{'term': {'assignments_nested.assignee_id': 'someuse.user.@b.a.b.la.'}}]}}}}]}}
+
 
     def test_nested_query_and_with_quotes(self):
         query_string = 'assignments.assignee_id:"someuser.some.last.name" ' \
@@ -176,3 +189,15 @@ class TestESQueryCompilation(object):
                                     'gte': '2016-10-11T03:00:00'}}},
                                 {'term': {'schedules_nested.obj_status': 'active'}}]}},
                             'path': 'schedules_nested'}}]}}]}}
+
+    def test_range_query_with_brackets(self):
+        query_string ='schedules.end_date:[2016-10-11T03:00:00 TO 2016-10-18T02:59:59]'
+        params = {'es_q': query_string}
+        result = compile_es_query(params)
+        assert result == {'bool': {
+            'must': [{'nested': {'path': 'schedules_nested', 'query': {'bool': {
+                'must': [{'range': {'schedules_nested.end_date': {'lte': '2016-10-18T02:59:59',
+                                                                  'gte': '2016-10-11T03:00:00'
+                                                                  }}}]}}}}]}}
+
+

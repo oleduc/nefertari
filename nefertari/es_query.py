@@ -22,6 +22,12 @@ def compile_es_query(params):
     if len(query_tokens) > 1:
         tree = _build_tree(query_tokens)
         return {'bool': _build_es_query(tree)}
+
+    if _is_nested(query_string):
+        aggregation = {'bool': {'must': []}}
+        _attach_nested(query_string, aggregation['bool'], 'must')
+        return aggregation
+
     return {'bool': {'must': [_parse_term(query_string)]}}
 
 
@@ -67,7 +73,8 @@ def _get_tokens(values):
 
     if buffer:
         tokens.append(buffer)
-    return tokens
+
+    return _remove_needles_brackets(tokens)
 
 
 def _build_tree(tokens):
@@ -89,7 +96,7 @@ def _build_tree(tokens):
 
     head = Node()
 
-    for token in tokens:
+    for index, token in enumerate(tokens):
         if token == '(':
             head.next = Node(head)
             head.values.append(head.next)
@@ -101,6 +108,43 @@ def _build_tree(tokens):
 
         head.values.append(token)
     return head.parse()
+
+
+def _remove_needles_brackets(tokens):
+    """
+    remove top level needless brackets
+    :param tokens: list of tokens  - "(", ")", terms and keywords
+    :return: list of tokens  -  "(", ")", terms and keywords
+    """
+
+    if '(' not in tokens and ')' not in tokens:
+        return tokens
+
+    keywords = {'AND', 'OR', 'OR NOT', 'AND NOT'}
+    brackets_count = 0
+    last_bracket_index = False
+
+    for index, token in enumerate(tokens):
+
+        if token == '(':
+            brackets_count += 1
+            continue
+
+        if token == ')':
+            brackets_count -= 1
+            last_bracket_index = index
+            continue
+
+        if brackets_count == 0:
+            if token in keywords:
+                last_bracket_index = False
+                break
+
+    if last_bracket_index:
+        for needless_bracket in [last_bracket_index, 0]:
+            removed_token = tokens[needless_bracket]
+            tokens.remove(removed_token)
+    return tokens
 
 
 def _build_es_query(values):
@@ -179,6 +223,7 @@ def _parse_term(item):
     """
 
     field, value = smart_split(item)
+
     if '|' in value:
         values = value.split('|')
         return {'bool': {'should': [{'term': {field: value}} for value in values]}}
@@ -271,6 +316,7 @@ def _attach_nested(value, aggregation, operation):
     existed_items = aggregation[operation]
     invert_operation = {'must': 'must', 'must_not': 'must',
                         'should_not': 'should', 'should': 'should'}
+
     for item in existed_items:
         if 'nested' in item:
             item_path = item['nested'].get('path', False)
