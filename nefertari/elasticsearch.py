@@ -3,12 +3,12 @@ import json
 import logging
 from functools import partial
 from collections import defaultdict
+import os
 
 
 import elasticsearch
 from elasticsearch.exceptions import ConflictError, ElasticsearchException, TransportError
 from elasticsearch import helpers
-import os
 import six
 
 
