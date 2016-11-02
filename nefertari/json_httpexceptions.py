@@ -59,12 +59,14 @@ def create_json_response(obj, request=None, log_it=False, show_stack=False,
     show_stack = log_it or show_stack
     status = obj.status_int
 
-    if 400 <= status < 600 and status not in BLACKLIST_LOG or log_it:
+    if 400 <= status < 600 or log_it:
         msg = '%s: %s' % (obj.status.upper(), obj.body)
         if obj.status_int in [400, 500] or show_stack:
             msg += '\nSTACK TRACE BEGIN>>\n%s\nSTACK END<<' % add_stack(obj)
-
-        logger.error(msg)
+        if status in BLACKLIST_LOG:
+            logger.info(msg)
+        else:
+            logger.error(msg)
 
     obj.content_type = 'application/json'
     return obj
