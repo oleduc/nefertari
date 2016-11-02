@@ -15,21 +15,20 @@ class TestESQueryCompilation(object):
         query_string = '(item:value OR item:value)'
         tokens = _get_tokens(query_string)
         tree = _build_tree(tokens)
-        assert ['item:value', 'OR', 'item:value'] == tree
+        assert tree == ['item:value', 'OR', 'item:value']
 
     def test_build_tree(self):
         query_string = '(item:value OR item:value) AND ((item:value OR item:value AND complicated:false) OR (item:value OR item:value))'
         tokens = _get_tokens(query_string)
         tree = _build_tree(tokens)
-        assert [['item:value', 'OR', 'item:value'], 'AND',
-                [['item:value', 'OR', 'item:value', 'AND', 'complicated:false'], 'OR',
-                 ['item:value', 'OR', 'item:value']]] == tree
+        assert tree == [['item:value', 'OR', 'item:value'], 'AND',
+                        [['item:value', 'OR', 'item:value', 'AND', 'complicated:false'], 'OR',
+                         ['item:value', 'OR', 'item:value']]]
 
     def test_nested_query(self):
         query_string = 'assignments.assignee_id:someuse'
         params = {'es_q': query_string}
         result = compile_es_query(params)
-        print(result)
         assert result == {'bool': {
             'must': [{
                 'nested': {'query': {'bool': {

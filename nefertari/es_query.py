@@ -74,7 +74,7 @@ def _get_tokens(values):
     if buffer:
         tokens.append(buffer)
 
-    return _remove_needles_brackets(tokens)
+    return _remove_needless_parentheses(tokens)
 
 
 def _build_tree(tokens):
@@ -96,7 +96,7 @@ def _build_tree(tokens):
 
     head = Node()
 
-    for index, token in enumerate(tokens):
+    for token in tokens:
         if token == '(':
             head.next = Node(head)
             head.values.append(head.next)
@@ -110,9 +110,9 @@ def _build_tree(tokens):
     return head.parse()
 
 
-def _remove_needles_brackets(tokens):
+def _remove_needless_parentheses(tokens):
     """
-    remove top level needless brackets
+    remove top level needless parentheses
     :param tokens: list of tokens  - "(", ")", terms and keywords
     :return: list of tokens  -  "(", ")", terms and keywords
     """
@@ -294,11 +294,7 @@ def smart_split(item, split_key=':'):
     :param split_key: key, which we use to split string
     :return:
     """
-    split_index = -1
-    for index, key in enumerate(item):
-        if key == split_key:
-            split_index = index
-            break
+    split_index = item.find(split_key)
     return [item[0:split_index], item[split_index + 1:]]
 
 
