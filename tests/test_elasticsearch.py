@@ -4,7 +4,6 @@ import six
 import pytest
 from mock import Mock, patch, call
 from elasticsearch.exceptions import TransportError
-import elasticsearch
 from nefertari import elasticsearch as es
 from nefertari.json_httpexceptions import JHTTPBadRequest, JHTTPNotFound
 from nefertari.utils import dictset
@@ -980,86 +979,4 @@ class TestES(object):
         with pytest.raises(es.UnknownDocumentProxiesTypeError) as excinfo:
             es.ES.document_proxy.get_document_proxies_by_type('Bar')
         assert 'You have no proxy for this Bar document type' in str(excinfo)
-
-    def test_nested_query(self):
-        params = 'assignments.assignee_id: someuse'
-        obj = es.ES('Foo', 'foondex', chunk_size=100)
-        result = obj.build_nested_query({'_nested': params})
-        assert result == {'path': 'assignments_nested', 'query':
-                             {'bool':
-                                 {'must':
-                                    [{'match': {'assignments_nested.assignee_id': 'someuse'}}]}}}
-
-    def test_nested_query_with_quotes(self):
-        params = 'assignments.assignee_id: "someuse.user.@b.a.b.la."'
-        obj = es.ES('Foo', 'foondex', chunk_size=100)
-        result = obj.build_nested_query({'_nested': params})
-        assert result == {'path': 'assignments_nested', 'query':
-                             {'bool':
-                                 {'must':
-                                    [{'match': {'assignments_nested.assignee_id':  'someuse.user.@b.a.b.la.'}}]}}}
-
-    def test_nested_query_and_with_quotes(self):
-        params = 'assignments.assignee_id:"someuser.some.last.name" ' \
-                 'AND assignments.assignor_id: "changed.user.name"'
-        obj = es.ES('Foo', 'foondex', chunk_size=100)
-
-        result = obj.build_nested_query({'_nested': params})
-        assert result == {'path': 'assignments_nested', 'query':
-            {'bool':
-                 {'must':
-                      [{'match': {'assignments_nested.assignee_id': 'someuser.some.last.name'}},
-                       {'match': {'assignments_nested.assignor_id': 'changed.user.name'}}]}}}
-
-
-    def test_nested_query_and(self):
-        params = 'assignments.assignee_id: someuse AND assignments.is_completed:true'
-        obj = es.ES('Foo', 'foondex', chunk_size=100)
-
-        result = obj.build_nested_query({'_nested': params})
-        assert result == {'path': 'assignments_nested', 'query':
-            {'bool':
-                 {'must':
-                      [{'match': {'assignments_nested.assignee_id': 'someuse'}},
-                       {'match': {'assignments_nested.is_completed': 'true'}}]}}}
-
-    def test_nested_query_not(self):
-        params = 'NOT assignments.assignee_id: someuse'
-        obj = es.ES('Foo', 'foondex', chunk_size=100)
-
-        result = obj.build_nested_query({'_nested': params})
-        assert result == {'path': 'assignments_nested', 'query':
-            {'bool':
-                 {'must_not':
-                      [{'match': {'assignments_nested.assignee_id': 'someuse'}}]}}}
-
-    def test_build_search_params_with_nested(self):
-        es.ES.document_proxies = {'FSoo': None}
-        obj = es.ES('FSoo', 'foosndex', chunk_size=122)
-        params = obj.build_search_params(
-            {'foo': 1, 'zoo': 2, 'q': '5', '_limit': 10, '_nested': 'assignments.assignee_id: someuse AND NOT assignments.assignor_id: someusesaqk '}
-        )
-        print(params)
-        assert params == {'body':
-                              {'query':
-                                   {'bool':
-                                        {'must':
-                                             [
-                                                 {'nested': {'query': {'bool': {'must_not':
-                                                                                 [{'match': {'assignments_nested.assignor_id': 'someusesaqk'}}],
-                                                                             'must': [{'match': {'assignments_nested.assignee_id': 'someuse'}}]}},
-                                                          'path': 'assignments_nested'}
-                                               }, {'query_string': {'query': 'foo:1 AND zoo:2 AND 5'}}
-                                             ]}}},
-                          'from_': 0, 'index': 'foosndex', 'doc_type': 'FSoo', 'size': 10}
-
-    def test_nested_query_complicated(self):
-        params = 'NOT assignments.assignee_id: someuse AND NOT assignments.assignor_id: someusesaqk AND assignments.is_completed:true'
-        obj = es.ES('Foo', 'foondex', chunk_size=100)
-        result = obj.build_nested_query({'_nested': params})
-        print(result)
-        assert result == {'path': 'assignments_nested',
-                          'query': {'bool':
-                                         {'must_not': [{'match': {'assignments_nested.assignee_id': 'someuse'}}, {'match': {'assignments_nested.assignor_id': 'someusesaqk'}}],
-                                          'must': [{'match': {'assignments_nested.is_completed': 'true'}}]}}}
 
