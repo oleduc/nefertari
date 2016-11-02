@@ -6,7 +6,7 @@ from collections import defaultdict
 
 
 import elasticsearch
-from elasticsearch.exceptions import ConflictError, ElasticsearchException
+from elasticsearch.exceptions import ConflictError, ElasticsearchException, TransportError
 from elasticsearch import helpers
 import os
 import six
@@ -52,10 +52,10 @@ class ESHttpConnection(elasticsearch.Urllib3HttpConnection):
                     msg = msg[:300] + '...TRUNCATED...' + msg[-212:]
                 log.debug(msg)
             resp = super(ESHttpConnection, self).perform_request(*args, **kw)
-        except Exception as e:
-            log.error(e.error)
+        except TransportError as e:
             status_code = e.status_code
             if status_code == 404 and 'IndexMissingException' in e.error:
+                log.error(str(e))
                 raise IndexNotFoundException()
             if status_code == 'N/A':
                 status_code = 400
