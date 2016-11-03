@@ -1,7 +1,6 @@
 from mock import patch, Mock, call
 
 from nefertari import events
-from nefertari_sqla import ESBaseDocument
 
 
 class TestEvents(object):
@@ -44,7 +43,8 @@ class TestEvents(object):
         mock_before = Mock()
         mock_from.return_value = {'foo': 1}
 
-        ctx = Mock(spec=ESBaseDocument)
+        ctx = Mock()
+        ctx.__class__.is_ESMetaclass = True
 
         mock_initial_state = Mock()
         view = Mock(

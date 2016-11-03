@@ -3,20 +3,21 @@ import json
 import logging
 from functools import partial
 from collections import defaultdict
+import os
 
 
 import elasticsearch
-from elasticsearch.exceptions import ConflictError, ElasticsearchException
+from elasticsearch.exceptions import ConflictError, ElasticsearchException, TransportError
 from elasticsearch import helpers
-import os
 import six
 
 
 from nefertari.utils import (
-    dictset, dict2proxy, process_limit, split_strip, to_dicts, DataProxy, SingletonMeta)
+    dictset, dict2proxy, process_limit, split_strip, DataProxy, SingletonMeta)
 from nefertari.json_httpexceptions import (
     JHTTPBadRequest, JHTTPNotFound, exception_response)
 from nefertari import engine, RESERVED_PARAMS
+from nefertari.es_query import compile_es_query
 
 log = logging.getLogger(__name__)
 
@@ -51,10 +52,10 @@ class ESHttpConnection(elasticsearch.Urllib3HttpConnection):
                     msg = msg[:300] + '...TRUNCATED...' + msg[-212:]
                 log.debug(msg)
             resp = super(ESHttpConnection, self).perform_request(*args, **kw)
-        except Exception as e:
-            log.error(e.error)
+        except TransportError as e:
             status_code = e.status_code
             if status_code == 404 and 'IndexMissingException' in e.error:
+                log.error(str(e))
                 raise IndexNotFoundException()
             if status_code == 'N/A':
                 status_code = 400
@@ -779,15 +780,9 @@ class ES(object):
             params.get('_page', None),
             params['_limit'])
 
-        if '_nested' in params:
+        if 'es_q' in params:
             if 'query' in _params['body']:
-                old_query = _params['body']['query']
-                _params['body']['query'] = {'bool': {'must': []}}
-                nested = dict()
-
-                nested['nested'] = self.build_nested_query(params)
-                _params['body']['query']['bool']['must'].append(nested)
-                _params['body']['query']['bool']['must'].append(old_query)
+                _params['body']['query'] = compile_es_query(params)
 
         if '_sort' in params and self.proxy:
             params['_sort'] = substitute_nested_terms(params['_sort'], self.proxy.substitutions)
@@ -831,39 +826,6 @@ class ES(object):
             return self.api.count(**params)['count']
         except IndexNotFoundException:
             return 0
-
-    def build_nested_query(self, params):
-        nested_string = params.pop('_nested')
-        nested_query = ''
-        path_position = None
-        start_index = 0
-        in_quotes = False
-        for index, key in enumerate(nested_string):
-
-            if key == ' ':
-                start_index = index
-
-            if key == '"' and not in_quotes:
-                in_quotes = True
-                key = ''
-            elif key == '"' and in_quotes:
-                in_quotes = False
-                key = ''
-
-            if key == '.' and not in_quotes:
-                key = '_nested.'
-                if not path_position:
-                    path_position = (start_index, index)
-
-            nested_query = nested_query + key
-
-        start_index, end_index = path_position
-        path = (nested_string[start_index:end_index] + '_nested').strip()
-
-        _params = build_nested_terms(nested_query)
-        return {'path': path, 'query': {'bool': _params}}
-
-
 
     def aggregate(self, **params):
         """ Perform aggreration
