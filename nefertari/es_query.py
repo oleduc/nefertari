@@ -231,7 +231,7 @@ def _parse_term(item):
         return {'missing': {'field': field}}
     if value.startswith('[') and value.endswith(']'):
         return _parse_range(field, value[1:len(value) - 1])
-    return {'term': {field: value}}
+    return {'match': {field: value}}
 
 
 def _parse_range(field, value):
