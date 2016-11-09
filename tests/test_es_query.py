@@ -199,4 +199,8 @@ class TestESQueryCompilation(object):
                                                                   'gte': '2016-10-11T03:00:00'
                                                                   }}}]}}}}]}}
 
-
+    def test_array_matching(self):
+        query_string = 'inbox:["some@user.com", "another@user.com"]'
+        params = {'es_q': query_string}
+        result = compile_es_query(params)
+        assert result == ''

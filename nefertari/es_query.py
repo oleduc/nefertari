@@ -229,9 +229,20 @@ def _parse_term(item):
         return {'bool': {'should': [{'term': {field: value}} for value in values]}}
     if value == '_missing_':
         return {'missing': {'field': field}}
-    if value.startswith('[') and value.endswith(']'):
+    if value.startswith('[') and value.endswith(']') and 'TO' in value:
         return _parse_range(field, value[1:len(value) - 1])
+    if value.startswith('[') and value.endswith(']'):
+        return _parse_array(field, value[1:len(value) - 1])
     return {'match': {field: value}}
+
+
+def _parse_array(field, value):
+    values = ['{value}'.format(value=item.strip()) for item in value.split(',')]
+    if '_strict' in field:
+        field = field.replace('_strict', '')
+        return {'bool': {'must': [{'term':  {field: value}} for value in values]}}
+    else:
+        return {'bool': {'should': [{'term': {field: value}} for value in values]}}
 
 
 def _parse_range(field, value):
