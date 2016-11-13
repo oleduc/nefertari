@@ -74,7 +74,12 @@ def _get_tokens(values):
     if buffer:
         tokens.append(buffer)
 
-    return _remove_needless_parentheses(tokens)
+    while True:
+        tokens, removed = _remove_needless_parentheses(tokens)
+        if not removed:
+            break
+
+    return tokens
 
 
 def _build_tree(tokens):
@@ -118,8 +123,7 @@ def _remove_needless_parentheses(tokens):
     """
 
     if '(' not in tokens and ')' not in tokens:
-        return tokens
-
+        return tokens, False
     keywords = {'AND', 'OR', 'OR NOT', 'AND NOT'}
     brackets_count = 0
     last_bracket_index = False
@@ -144,7 +148,8 @@ def _remove_needless_parentheses(tokens):
         for needless_bracket in [last_bracket_index, 0]:
             removed_token = tokens[needless_bracket]
             tokens.remove(removed_token)
-    return tokens
+        return tokens, True
+    return tokens, False
 
 
 def _build_es_query(values):
@@ -160,17 +165,10 @@ def _build_es_query(values):
             values_stack.append(value)
 
         if len(operations_stack) == 1 and len(values_stack) == 2:
-            value2 = values_stack.pop()
-            value1 = values_stack.pop()
+            value2 = _extract_value(values_stack.pop())
+            value1 = _extract_value(values_stack.pop())
 
             operation = operations_stack.pop()
-
-            if isinstance(value1, list):
-                value1 = {'bool': _build_es_query(value1)}
-
-            if isinstance(value2, list):
-                value2 = {'bool': _build_es_query(value2)}
-
             keyword_exists = aggregation.get(operation, False)
 
             if keyword_exists:
@@ -189,6 +187,15 @@ def _build_es_query(values):
             values_stack.append(None)
 
     return aggregation
+
+
+def _extract_value(value):
+    is_list = isinstance(value, list)
+    if is_list and len(value) > 1:
+        return {'bool': _build_es_query(value)}
+    elif is_list and len(value) == 1:
+        return _extract_value(value.pop())
+    return value
 
 
 def _attach_item(item, aggregation, operation):
