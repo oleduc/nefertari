@@ -43,7 +43,6 @@ class TestESQueryCompilation(object):
             'must': [{'nested': {'path': 'assignments_nested', 'query': {'bool': {
                 'must': [{'match': {'assignments_nested.assignee_id': 'someuse.user.@b.a.b.la.'}}]}}}}]}}
 
-
     def test_nested_query_and_with_quotes(self):
         query_string = 'assignments.assignee_id:"someuser.some.last.name" ' \
                  'AND assignments.assignor_id:"changed.user.name"'
@@ -198,9 +197,32 @@ class TestESQueryCompilation(object):
                 'must': [{'range': {'schedules_nested.end_date': {'lte': '2016-10-18T02:59:59',
                                                                   'gte': '2016-10-11T03:00:00'
                                                                   }}}]}}}}]}}
-
-    def test_array_matching(self):
-        query_string = 'inbox:["some@user.com", "another@user.com"]'
+    def test_statements_in_parentheses(self):
+        query_string = '(assignments.assignee_id:someuse) AND (assignments.is_completed:true)'
         params = {'es_q': query_string}
         result = compile_es_query(params)
-        assert result == ''
+        assert result == {'bool': {'must': [{'nested': {'query': {'bool': {
+            'must': [{'match': {'assignments_nested.assignee_id': 'someuse'}},
+                     {'match': {'assignments_nested.is_completed': 'true'}}]}},
+                                                        'path': 'assignments_nested'}}]}}
+
+    def test_do_not_apply_needless_parentheses(self):
+        query_string = '((((assignments.assignee_id:someuse)) AND ((assignments.is_completed:true))))'
+        params = {'es_q': query_string}
+        result = compile_es_query(params)
+        assert result == {'bool': {'must': [{'nested': {'query': {'bool': {
+            'must': [{'match': {'assignments_nested.assignee_id': 'someuse'}},
+                     {'match': {'assignments_nested.is_completed': 'true'}}]}},
+                                                        'path': 'assignments_nested'}}]}}
+
+    def test_do_not_apply_needless_parentheses_with_statements(self):
+        query_string = '((((assignments.assignee_id:someuse)) AND ((assignments.is_completed:true))) OR assignments.is_completed:brayan)'
+        params = {'es_q': query_string}
+        result = compile_es_query(params)
+        assert result == {'bool': {
+            'must': [{'nested': {'path': 'assignments_nested', 'query': {'bool': {
+                'must': [{'match': {'assignments_nested.assignee_id': 'someuse'}}]}}}}, {'bool': {
+                'should': [{'nested': {'path': 'assignments_nested', 'query': {'bool': {
+                    'should': [{'match': {'assignments_nested.is_completed': 'true'}},
+                               {'match': {'assignments_nested.is_completed': 'brayan'}}]}}}}]}}]}}
+
