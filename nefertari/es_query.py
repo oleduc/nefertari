@@ -1,7 +1,7 @@
 
 
 class OperationStack(list):
-    es_keywords = {'AND': 'must', 'OR': 'should', 'AND NOT': 'must_not', 'OR NOT': 'should_not'}
+    es_keywords = {'AND': 'must', 'OR': 'should', 'AND NOT': 'must_not'}
 
     def pop(self, index=None):
         return self.es_keywords[super(OperationStack, self).pop()]
@@ -25,10 +25,10 @@ def compile_es_query(params):
 
     if _is_nested(query_string):
         aggregation = {'bool': {'must': []}}
-        _attach_nested(query_string, aggregation['bool'], 'must')
+        _attach_nested(query_tokens.pop(), aggregation['bool'], 'must')
         return aggregation
 
-    return {'bool': {'must': [_parse_term(query_string)]}}
+    return {'bool': {'must': [_parse_term(query_tokens.pop())]}}
 
 
 def _get_tokens(values):
@@ -174,10 +174,7 @@ def _build_es_query(values):
             if keyword_exists:
                 _attach_item(value2, aggregation, operation)
             else:
-                if operation == 'should_not':
-                    _attach_item(value1, aggregation, 'should')
-                    _attach_item(value2, aggregation, operation)
-                elif operation == 'must_not':
+                if operation == 'must_not':
                     _attach_item(value1, aggregation, 'must')
                     _attach_item(value2, aggregation, operation)
                 else:
@@ -213,7 +210,7 @@ def _attach_item(item, aggregation, operation):
     # init value or get existed
     aggregation[operation] = aggregation.get(operation, [])
 
-    if operation == 'should' and 'minimum_should_match' not in aggregation:
+    if 'should' == operation:
         aggregation['minimum_should_match'] = 1
 
     if _is_nested(item):
@@ -320,8 +317,7 @@ def _attach_nested(value, aggregation, operation):
     field, _ = smart_split(value)
     path = field.split('.')[0]
     existed_items = aggregation[operation]
-    invert_operation = {'must': 'must', 'must_not': 'must',
-                        'should_not': 'should', 'should': 'should'}
+    invert_operation = {'must': 'must', 'must_not': 'must', 'should': 'should'}
 
     for item in existed_items:
         if 'nested' in item:
@@ -329,6 +325,10 @@ def _attach_nested(value, aggregation, operation):
             if item_path == path:
                 item['nested']['query']['bool'][invert_operation[operation]]\
                     .append(_parse_term(value))
+
+                if operation == 'should':
+                    item['nested']['query']['bool']['minimum_should_match'] = 1
+
                 break
     else:
         existed_items.append({'nested': {
