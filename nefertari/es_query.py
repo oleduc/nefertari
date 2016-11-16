@@ -213,7 +213,7 @@ def _attach_item(item, aggregation, operation):
     # init value or get existed
     aggregation[operation] = aggregation.get(operation, [])
 
-    if operation == 'should':
+    if operation == 'should' and 'minimum_should_match' not in aggregation:
         aggregation['minimum_should_match'] = 1
 
     if _is_nested(item):
