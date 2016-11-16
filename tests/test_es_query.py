@@ -226,3 +226,10 @@ class TestESQueryCompilation(object):
                     'should': [{'match': {'assignments_nested.is_completed': 'true'}},
                                {'match': {'assignments_nested.is_completed': 'brayan'}}]}}}}]}}]}}
 
+    def test_simple_query(self):
+        query_string = 'assignments.assignee_id:"qweqweqwe"'
+        params = {'es_q': query_string}
+        result = compile_es_query(params)
+        assert result == {'bool': {
+            'must': [{'nested': {'path': 'assignments_nested', 'query': {'bool': {
+                'must': [{'match': {'assignments_nested.assignee_id': 'qweqweqwe'}}]}}}}]}}

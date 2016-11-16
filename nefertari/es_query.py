@@ -21,7 +21,7 @@ def compile_es_query(params):
 
     if len(query_tokens) > 1:
         tree = _build_tree(query_tokens)
-        return {'bool': _build_es_query(tree)}
+        return {'bool': {'must': [{'bool': _build_es_query(tree)}]}}
 
     if _is_nested(query_string):
         aggregation = {'bool': {'must': []}}
@@ -213,6 +213,9 @@ def _attach_item(item, aggregation, operation):
     # init value or get existed
     aggregation[operation] = aggregation.get(operation, [])
 
+    if operation == 'should':
+        aggregation['minimum_should_match'] = 1
+
     if _is_nested(item):
         _attach_nested(item, aggregation, operation)
     elif isinstance(item, dict):
@@ -238,18 +241,7 @@ def _parse_term(item):
         return {'missing': {'field': field}}
     if value.startswith('[') and value.endswith(']') and 'TO' in value:
         return _parse_range(field, value[1:len(value) - 1])
-    if value.startswith('[') and value.endswith(']'):
-        return _parse_array(field, value[1:len(value) - 1])
-    return {'match': {field: value}}
-
-
-def _parse_array(field, value):
-    values = ['{value}'.format(value=item.strip()) for item in value.split(',')]
-    if '_strict' in field:
-        field = field.replace('_strict', '')
-        return {'bool': {'must': [{'term':  {field: value}} for value in values]}}
-    else:
-        return {'bool': {'should': [{'term': {field: value}} for value in values]}}
+    return {'term': {field: value}}
 
 
 def _parse_range(field, value):
