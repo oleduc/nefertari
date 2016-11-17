@@ -224,8 +224,8 @@ class TestESQueryCompilation(object):
                     }},
                         'path': 'assignments_nested'}}], 'minimum_should_match': 1}}]}}]}}
 
-    def test_simple_query(self):
-        query_string = 'assignments.assignee_id:"qweqweqwe"'
+    def test_simple_query_with_parentheses(self):
+        query_string = '(assignments.assignee_id:"qweqweqwe")'
         params = {'es_q': query_string}
         result = compile_es_query(params)
         assert result == {'bool': {
