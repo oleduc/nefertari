@@ -1,7 +1,7 @@
 
 
 class OperationStack(list):
-    es_keywords = {'AND': 'must', 'OR': 'should', 'AND NOT': 'must_not', 'OR NOT': 'should_not'}
+    es_keywords = {'AND': 'must', 'OR': 'should', 'AND NOT': 'must_not'}
 
     def pop(self, index=None):
         return self.es_keywords[super(OperationStack, self).pop()]
@@ -21,14 +21,14 @@ def compile_es_query(params):
 
     if len(query_tokens) > 1:
         tree = _build_tree(query_tokens)
-        return {'bool': _build_es_query(tree)}
+        return {'bool': {'must': [{'bool': _build_es_query(tree)}]}}
 
     if _is_nested(query_string):
         aggregation = {'bool': {'must': []}}
-        _attach_nested(query_string, aggregation['bool'], 'must')
+        _attach_nested(query_tokens.pop(), aggregation['bool'], 'must')
         return aggregation
 
-    return {'bool': {'must': [_parse_term(query_string)]}}
+    return {'bool': {'must': [_parse_term(query_tokens.pop())]}}
 
 
 def _get_tokens(values):
@@ -74,7 +74,12 @@ def _get_tokens(values):
     if buffer:
         tokens.append(buffer)
 
-    return _remove_needless_parentheses(tokens)
+    while True:
+        tokens, removed = _remove_needless_parentheses(tokens)
+        if not removed:
+            break
+
+    return tokens
 
 
 def _build_tree(tokens):
@@ -118,8 +123,7 @@ def _remove_needless_parentheses(tokens):
     """
 
     if '(' not in tokens and ')' not in tokens:
-        return tokens
-
+        return tokens, False
     keywords = {'AND', 'OR', 'OR NOT', 'AND NOT'}
     brackets_count = 0
     last_bracket_index = False
@@ -144,7 +148,8 @@ def _remove_needless_parentheses(tokens):
         for needless_bracket in [last_bracket_index, 0]:
             removed_token = tokens[needless_bracket]
             tokens.remove(removed_token)
-    return tokens
+        return tokens, True
+    return tokens, False
 
 
 def _build_es_query(values):
@@ -160,26 +165,16 @@ def _build_es_query(values):
             values_stack.append(value)
 
         if len(operations_stack) == 1 and len(values_stack) == 2:
-            value2 = values_stack.pop()
-            value1 = values_stack.pop()
+            value2 = _extract_value(values_stack.pop())
+            value1 = _extract_value(values_stack.pop())
 
             operation = operations_stack.pop()
-
-            if isinstance(value1, list):
-                value1 = {'bool': _build_es_query(value1)}
-
-            if isinstance(value2, list):
-                value2 = {'bool': _build_es_query(value2)}
-
             keyword_exists = aggregation.get(operation, False)
 
             if keyword_exists:
                 _attach_item(value2, aggregation, operation)
             else:
-                if operation == 'should_not':
-                    _attach_item(value1, aggregation, 'should')
-                    _attach_item(value2, aggregation, operation)
-                elif operation == 'must_not':
+                if operation == 'must_not':
                     _attach_item(value1, aggregation, 'must')
                     _attach_item(value2, aggregation, operation)
                 else:
@@ -189,6 +184,15 @@ def _build_es_query(values):
             values_stack.append(None)
 
     return aggregation
+
+
+def _extract_value(value):
+    is_list = isinstance(value, list)
+    if is_list and len(value) > 1:
+        return {'bool': _build_es_query(value)}
+    elif is_list and len(value) == 1:
+        return _extract_value(value.pop())
+    return value
 
 
 def _attach_item(item, aggregation, operation):
@@ -205,6 +209,9 @@ def _attach_item(item, aggregation, operation):
 
     # init value or get existed
     aggregation[operation] = aggregation.get(operation, [])
+
+    if 'should' == operation and not aggregation.get('minimum_should_match', False):
+        aggregation['minimum_should_match'] = 1
 
     if _is_nested(item):
         _attach_nested(item, aggregation, operation)
@@ -229,9 +236,9 @@ def _parse_term(item):
         return {'bool': {'should': [{'term': {field: value}} for value in values]}}
     if value == '_missing_':
         return {'missing': {'field': field}}
-    if value.startswith('[') and value.endswith(']'):
+    if value.startswith('[') and value.endswith(']') and 'TO' in value:
         return _parse_range(field, value[1:len(value) - 1])
-    return {'match': {field: value}}
+    return {'term': {field: value}}
 
 
 def _parse_range(field, value):
@@ -310,8 +317,7 @@ def _attach_nested(value, aggregation, operation):
     field, _ = smart_split(value)
     path = field.split('.')[0]
     existed_items = aggregation[operation]
-    invert_operation = {'must': 'must', 'must_not': 'must',
-                        'should_not': 'should', 'should': 'should'}
+    invert_operation = {'must': 'must', 'must_not': 'must', 'should': 'should'}
 
     for item in existed_items:
         if 'nested' in item:
@@ -319,6 +325,10 @@ def _attach_nested(value, aggregation, operation):
             if item_path == path:
                 item['nested']['query']['bool'][invert_operation[operation]]\
                     .append(_parse_term(value))
+
+                if operation == 'should':
+                    item['nested']['query']['bool']['minimum_should_match'] = 1
+
                 break
     else:
         existed_items.append({'nested': {
