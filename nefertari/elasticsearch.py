@@ -783,7 +783,7 @@ class ES(object):
         if 'es_q' in params:
             if 'query' in _params['body']:
                 _params['body']['query'] = compile_es_query(params)
-                print(_params['body']['query'])
+                log.debug('Parsed ES request body {body}'.format(body=_params['body']['query']))
 
         if '_sort' in params and self.proxy:
             params['_sort'] = substitute_nested_terms(params['_sort'], self.proxy.substitutions)
