@@ -29,7 +29,6 @@ class TestESQueryCompilation(object):
         query_string = 'assignments.assignee_id:someuse'
         params = {'es_q': query_string}
         result = compile_es_query(params)
-        print(result)
         assert result == {'bool': {
             'must': [{'nested': {'path': 'assignments_nested', 'query': {'bool': {
                 'must': [{'term': {'assignments_nested.assignee_id': 'someuse'}}]}}}}]}}
@@ -38,7 +37,6 @@ class TestESQueryCompilation(object):
         query_string = 'assignments.assignee_id:"someuse.user.@b.a.b.la."'
         params = {'es_q': query_string}
         result = compile_es_query(params)
-        print(result)
         assert result == {'bool': {
             'must': [{'nested': {'query': {'bool': {
                 'must': [{'term': {'assignments_nested.assignee_id': 'someuse.user.@b.a.b.la.'}}]}},
@@ -82,8 +80,15 @@ class TestESQueryCompilation(object):
         query_string = '(assignments.assignee_id:someuser OR assignments.is_completed:false AND assignments.assignor_id:another) OR owner_id:someuser'
         params = {'es_q': query_string}
         result = compile_es_query(params)
-        print(result)
-        assert result == {'bool': {'must': [{'bool': {'should': [{'bool': {'should': [{'nested': {'path': 'assignments_nested', 'query': {'bool': {'should': [{'term': {'assignments_nested.assignee_id': 'someuser'}}, {'term': {'assignments_nested.is_completed': 'false'}}], 'minimum_should_match': 1}}}}], 'must': [{'nested': {'path': 'assignments_nested', 'query': {'bool': {'must': [{'term': {'assignments_nested.assignor_id': 'another'}}]}}}}], 'minimum_should_match': 1}}, {'term': {'owner_id': 'someuser'}}], 'minimum_should_match': 1}}]}}
+        assert result == {'bool': {
+            'must': [{'bool': {
+                'should': [{'bool': {
+                    'should': [{'nested': {'path': 'assignments_nested', 'query': {'bool': {
+                        'should': [{'term': {'assignments_nested.assignee_id': 'someuser'}},
+                                   {'term': {'assignments_nested.is_completed': 'false'}}],
+                        'minimum_should_match': 1}}}}], 'must': [{'nested': {'path': 'assignments_nested', 'query': {'bool': {
+                        'must': [{'term': {'assignments_nested.assignor_id': 'another'}}]}}}}],
+                    'minimum_should_match': 1}}, {'term': {'owner_id': 'someuser'}}], 'minimum_should_match': 1}}]}}
 
     def test_very_complicated_query(self):
         query_string = '((assignments.assignee_id:someuser OR assignments.is_completed:false) ' \
@@ -92,7 +97,6 @@ class TestESQueryCompilation(object):
                        'OR owner_id:someuser AND NOT completed:false'
         params = {'es_q': query_string}
         result = compile_es_query(params)
-        print(result)
         assert result == {'bool': {
             'must': [{'bool': {
                 'must_not': [{'term': {'completed': 'false'}}],
@@ -118,7 +122,6 @@ class TestESQueryCompilation(object):
         query_string = 'schedules.end_date:[2016-10-11T03:00:00 TO 2016-10-18T02:59:59] AND schedules.obj_status:active'
         params = {'es_q': query_string}
         result = compile_es_query(params)
-        print(result)
         assert result == {'bool': {
             'must': [{'bool': {
                 'must': [{'nested': {'query': {'bool': {
@@ -225,7 +228,6 @@ class TestESQueryCompilation(object):
         query_string = 'assignments.assignee_id:"qweqweqwe"'
         params = {'es_q': query_string}
         result = compile_es_query(params)
-        print(result)
         assert result == {'bool': {
             'must': [{'nested': {'path': 'assignments_nested', 'query': {'bool': {
                 'must': [{'term': {'assignments_nested.assignee_id': 'qweqweqwe'}}]}}}}]}}
