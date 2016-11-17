@@ -782,7 +782,14 @@ class ES(object):
 
         if 'es_q' in params:
             if 'query' in _params['body']:
-                _params['body']['query'] = compile_es_query(params)
+                try:
+                    _params['body']['query'] = compile_es_query(params)
+                except Exception:
+                    raise JHTTPBadRequest('Bad query string for {params}'
+                                          .format(
+                                                  params=_params['body']['query']['query_string']['query']))
+
+                log.debug('Parsed ES request body {body}'.format(body=_params['body']['query']))
 
         if '_sort' in params and self.proxy:
             params['_sort'] = substitute_nested_terms(params['_sort'], self.proxy.substitutions)
