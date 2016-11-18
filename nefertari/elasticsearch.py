@@ -15,7 +15,7 @@ import six
 from nefertari.utils import (
     dictset, dict2proxy, process_limit, split_strip, DataProxy, SingletonMeta)
 from nefertari.json_httpexceptions import (
-    JHTTPBadRequest, JHTTPNotFound, exception_response)
+    JHTTPBadRequest, JHTTPNotFound, exception_response, JHTTPUnprocessableEntity)
 from nefertari import engine, RESERVED_PARAMS
 from nefertari.es_query import compile_es_query, apply_analyzer
 
@@ -776,10 +776,11 @@ class ES(object):
             else:
                 _params['body'] = {'query': {'match_all': {}}}
         else:
-            raise JHTTPBadRequest('Illegal parameter "body"')
+            raise JHTTPUnprocessableEntity('Illegal parameter "body"')
+
         if '_limit' not in params:
             params['_limit'] = self.api.count(index=self.index_name)['count']
-        import ipdb; ipdb.set_trace()
+
         _params['from_'], _params['size'] = process_limit(
             params.get('_start', None),
             params.get('_page', None),
