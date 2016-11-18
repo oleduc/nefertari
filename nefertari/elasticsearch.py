@@ -765,7 +765,6 @@ class ES(object):
 
             if query_string:
                 query = {'must': [{'query_string': {'query': query_string}}]}
-                import ipdb; ipdb.set_trace()
                 if analyzed_terms:
                     query['must'].append(analyzed_terms)
 
