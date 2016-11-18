@@ -758,7 +758,7 @@ class ES(object):
         )
         _raw_terms = params.pop('q', '')
 
-        if 'body' not in params and 'es_q' not in params:
+        if 'body' not in params:
             document_cls = engine.get_document_cls(self.doc_type)
             mapping, _ = document_cls.get_es_mapping()
             analyzed_term = apply_analyzer(params, mapping[self.doc_type])
