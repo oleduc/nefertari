@@ -1,4 +1,4 @@
-from nefertari.es_query import compile_es_query, _get_tokens, _build_tree, _attach_nested
+from nefertari.es_query import compile_es_query, _get_tokens, _build_tree, apply_analyzer
 
 
 class TestESQueryCompilation(object):
@@ -231,3 +231,9 @@ class TestESQueryCompilation(object):
         assert result == {'bool': {
             'must': [{'nested': {'path': 'assignments_nested', 'query': {'bool': {
                 'must': [{'term': {'assignments_nested.assignee_id': 'qweqweqwe'}}]}}}}]}}
+
+    def test_apply_custom_analyzer(self):
+        mapping = {'properties': {'assignee_id': {'type': 'string', 'analyzer': 'email'}, 'simple': {'type': 'string'}}}
+        params = {'assignee_id': 'some_user', 'simple': 'new_value'}
+        result = apply_analyzer(params, mapping)
+        assert result == {'bool': {'must': [{'term': {'assignee_id': 'some_user'}}]}}

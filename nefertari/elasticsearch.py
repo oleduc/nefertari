@@ -17,7 +17,7 @@ from nefertari.utils import (
 from nefertari.json_httpexceptions import (
     JHTTPBadRequest, JHTTPNotFound, exception_response)
 from nefertari import engine, RESERVED_PARAMS
-from nefertari.es_query import compile_es_query
+from nefertari.es_query import compile_es_query, apply_analyzer
 
 log = logging.getLogger(__name__)
 
@@ -758,20 +758,25 @@ class ES(object):
         )
         _raw_terms = params.pop('q', '')
 
-        if 'body' not in params:
+        if 'body' not in params and 'es_q' not in params:
+            document_cls = engine.get_document_cls(self.doc_type)
+            mapping, _ = document_cls.get_es_mapping()
+            analyzed_term = apply_analyzer(params, mapping[self.doc_type])
             query_string = self.build_qs(params.remove(RESERVED_PARAMS), _raw_terms)
+
             if query_string:
-                _params['body'] = {
-                    'query': {
-                        'query_string': {
-                            'query': query_string
-                        }
-                    }
-                }
+                query = {'must': [{'query_string': {'query': query_string}}]}
+
+                if analyzed_term:
+                    query['must'].append(analyzed_term)
+
+                _params['body'] = {'query': {'bool': query}}
             else:
-                _params['body'] = {"query": {"match_all": {}}}
+                _params['body'] = {'query': {'match_all': {}}}
         else:
-            _params['body'] = params['body']
+            # using raw elasticsearch body requests is not secure
+            # params['body'] = params['body']
+            pass
         if '_limit' not in params:
             params['_limit'] = self.api.count(index=self.index_name)['count']
 
