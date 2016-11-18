@@ -763,11 +763,15 @@ class ES(object):
 
             query_string = self.build_qs(params.remove(RESERVED_PARAMS), _raw_terms)
 
-            if query_string:
-                query = {'must': [{'query_string': {'query': query_string}}]}
-                if analyzed_terms:
-                    query['must'].append(analyzed_terms)
+            query = {'must': []}
 
+            if query_string:
+                query['must'].append({'query_string': {'query': query_string}})
+
+            if analyzed_terms:
+                query['must'].append(analyzed_terms)
+
+            if query['must']:
                 _params['body'] = {'query': {'bool': query}}
             else:
                 _params['body'] = {'query': {'match_all': {}}}
