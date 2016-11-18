@@ -791,7 +791,8 @@ class ES(object):
 
             try:
                 _params['body']['query'] = compile_es_query(params)
-            except Exception:
+            except Exception as exc:
+                log.exception('es_q parsing error: {exc}'.format(exc=exc))
                 raise JHTTPBadRequest('Bad query string for {params}'
                                         .format(
                                                 params=_params['body']['query']['query_string']['query']))
