@@ -758,7 +758,7 @@ class ES(object):
         )
         _raw_terms = params.pop('q', '')
 
-        if 'body' not in params:
+        if 'body' not in params and 'es_q' not in params:
             analyzed_terms = apply_analyzer(params, self.doc_type, engine.get_document_cls)
 
             query_string = self.build_qs(params.remove(RESERVED_PARAMS), _raw_terms)
@@ -780,22 +780,22 @@ class ES(object):
 
         if '_limit' not in params:
             params['_limit'] = self.api.count(index=self.index_name)['count']
-
         _params['from_'], _params['size'] = process_limit(
             params.get('_start', None),
             params.get('_page', None),
             params['_limit'])
 
         if 'es_q' in params:
-            if 'query' in _params['body']:
-                try:
-                    _params['body']['query'] = compile_es_query(params)
-                except Exception:
-                    raise JHTTPBadRequest('Bad query string for {params}'
-                                          .format(
-                                                  params=_params['body']['query']['query_string']['query']))
+            _params['body'] = {}
 
-                log.debug('Parsed ES request body {body}'.format(body=_params['body']['query']))
+            try:
+                _params['body']['query'] = compile_es_query(params)
+            except Exception:
+                raise JHTTPBadRequest('Bad query string for {params}'
+                                        .format(
+                                                params=_params['body']['query']['query_string']['query']))
+
+            log.debug('Parsed ES request body {body}'.format(body=_params['body']['query']))
 
         if '_sort' in params and self.proxy:
             params['_sort'] = substitute_nested_terms(params['_sort'], self.proxy.substitutions)
