@@ -7,6 +7,18 @@ class OperationStack(list):
         return self.es_keywords[super(OperationStack, self).pop()]
 
 
+def apply_analyzer(params, mapping):
+    properties = mapping['properties']
+    apply_to = []
+    for property_name in properties.keys():
+        if 'analyzer' in properties[property_name] and property_name in params:
+            apply_to.append({property_name: params[property_name]})
+            del params[property_name]
+    if apply_to:
+        return {'bool': {'must': [{'term': term} for term in apply_to]}}
+    return False
+
+
 def compile_es_query(params):
     query_string = params.pop('es_q')
     # compile params as "AND conditions" on the top level of query_string
