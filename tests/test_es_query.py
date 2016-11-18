@@ -1,5 +1,5 @@
 from nefertari.es_query import compile_es_query, _get_tokens, _build_tree, apply_analyzer
-from mock import Mock, patch
+from mock import Mock
 
 
 class TestESQueryCompilation(object):
