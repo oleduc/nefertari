@@ -7,8 +7,15 @@ class OperationStack(list):
         return self.es_keywords[super(OperationStack, self).pop()]
 
 
-def apply_analyzer(params, mapping):
-    properties = mapping['properties']
+def apply_analyzer(params, doc_type, get_document_cls):
+    documents = doc_type.split(',')
+    document_classes = [(get_document_cls(document), document) for document in documents]
+    properties = {}
+
+    for document_cls, document_name in document_classes:
+        mapping, _ = document_cls.get_es_mapping()
+        properties.update(mapping[document_name]['properties'])
+
     apply_to = []
     for property_name in properties.keys():
         if 'analyzer' in properties[property_name] and property_name in params:

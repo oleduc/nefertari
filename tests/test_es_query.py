@@ -1,4 +1,5 @@
 from nefertari.es_query import compile_es_query, _get_tokens, _build_tree, apply_analyzer
+from mock import Mock, patch
 
 
 class TestESQueryCompilation(object):
@@ -233,7 +234,35 @@ class TestESQueryCompilation(object):
                 'must': [{'term': {'assignments_nested.assignee_id': 'qweqweqwe'}}]}}}}]}}
 
     def test_apply_custom_analyzer(self):
-        mapping = {'properties': {'assignee_id': {'type': 'string', 'analyzer': 'email'}, 'simple': {'type': 'string'}}}
+        document_cls = Mock()
+        document_cls.get_es_mapping = Mock(return_value=({'Assignment': {
+            'properties': {
+                'assignee_id': {'type': 'string', 'analyzer': 'email'},
+                'simple': {'type': 'string'}}}}, []))
+
+        get_document_cls = Mock(return_value=document_cls)
         params = {'assignee_id': 'some_user', 'simple': 'new_value'}
-        result = apply_analyzer(params, mapping)
+        result = apply_analyzer(params, 'Assignment', get_document_cls)
+        assert result == {'bool': {'must': [{'term': {'assignee_id': 'some_user'}}]}}
+
+    def test_apply_custom_analyzer_doesnt_duplicated(self):
+
+        def get_document_cls(model_name):
+            document = Mock()
+
+            if model_name == 'Assignment':
+                document.get_es_mapping = Mock(return_value=({'Assignment': {
+                    'properties': {
+                        'assignee_id': {'type': 'string', 'analyzer': 'email'},
+                        'simple': {'type': 'string'}}}}, []))
+                return document
+            if model_name == 'Task':
+                document.get_es_mapping = Mock(return_value=({'Task': {
+                    'properties': {
+                        'assignee_id': {'type': 'string', 'analyzer': 'email'},
+                        'simple': {'type': 'string'}}}}, []))
+
+                return document
+        params = {'assignee_id': 'some_user', 'simple': 'new_value'}
+        result = apply_analyzer(params, 'Assignment,Task', get_document_cls)
         assert result == {'bool': {'must': [{'term': {'assignee_id': 'some_user'}}]}}

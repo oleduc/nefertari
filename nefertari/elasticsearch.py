@@ -759,16 +759,15 @@ class ES(object):
         _raw_terms = params.pop('q', '')
 
         if 'body' not in params:
-            document_cls = engine.get_document_cls(self.doc_type)
-            mapping, _ = document_cls.get_es_mapping()
-            analyzed_term = apply_analyzer(params, mapping[self.doc_type])
+            analyzed_terms = apply_analyzer(params, self.doc_type, engine.get_document_cls)
+
             query_string = self.build_qs(params.remove(RESERVED_PARAMS), _raw_terms)
 
             if query_string:
                 query = {'must': [{'query_string': {'query': query_string}}]}
-
-                if analyzed_term:
-                    query['must'].append(analyzed_term)
+                import ipdb; ipdb.set_trace()
+                if analyzed_terms:
+                    query['must'].append(analyzed_terms)
 
                 _params['body'] = {'query': {'bool': query}}
             else:
