@@ -9,10 +9,10 @@ class OperationStack(list):
 
 def apply_analyzer(params, doc_type, get_document_cls):
     documents = doc_type.split(',')
-    document_classes = [(get_document_cls(document), document) for document in documents]
     properties = {}
 
-    for document_cls, document_name in document_classes:
+    for document_name in documents:
+        document_cls = get_document_cls(document_name)
         mapping, _ = document_cls.get_es_mapping()
         properties.update(mapping[document_name]['properties'])
 
