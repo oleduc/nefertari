@@ -775,7 +775,7 @@ class ES(object):
                 _params['body'] = {'query': {'bool': query}}
             else:
                 _params['body'] = {'query': {'match_all': {}}}
-        else:
+        if 'body' in params:
             raise JHTTPUnprocessableEntity('Illegal parameter "body"')
 
         if '_limit' not in params:
