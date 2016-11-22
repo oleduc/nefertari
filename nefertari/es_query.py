@@ -1,3 +1,4 @@
+import re
 
 
 class OperationStack(list):
@@ -34,7 +35,19 @@ def compile_es_query(params):
             continue
         else:
             query_string += ' AND '
-            query_string += ':'.join([key, value])
+            # parse statement
+            if '(' in value and ')' in value:
+                values = _get_tokens(re.sub('[()]', '', value))
+
+                def attach_key(item):
+                    if item != 'OR':
+                        return ':'.join([key, item])
+                    return item
+
+                values = ' '.join(map(attach_key,  values))
+                query_string += '({items})'.format(items=values)
+            else:
+                query_string += ':'.join([key, value])
     query_string = _parse_nested_items(query_string)
     query_tokens = _get_tokens(query_string)
 
