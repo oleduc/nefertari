@@ -266,3 +266,16 @@ class TestESQueryCompilation(object):
         params = {'assignee_id': 'some_user', 'simple': 'new_value'}
         result = apply_analyzer(params, 'Assignment,Task', get_document_cls)
         assert result == {'bool': {'must': [{'term': {'assignee_id': 'some_user'}}]}}
+
+    def test_parse_statement_inside_param_value(self):
+        query_string = '(assignments.assignee_id:"qweqweqwe")'
+        params = {'es_q': query_string, 'project_id': '(2 OR 3)'}
+        result = compile_es_query(params)
+        assert result == {'bool': {
+            'must': [{'bool': {
+                'must': [{'nested': {'path': 'assignments_nested',
+                                     'query': {'bool': {'must': [{'term': {'assignments_nested.assignee_id': 'qweqweqwe'}}]}}}},
+                         {'bool': {'should': [{'term': {'project_id': '2'}}, {'term': {'project_id': '3'}}],
+                                   'minimum_should_match': 1}}]}}]}}
+
+
