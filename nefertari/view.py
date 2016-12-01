@@ -134,7 +134,7 @@ class BaseView(OptionsViewMixin):
 
     def _run_init_actions(self):
         self.setup_default_wrappers()
-        self.convert_ids2objects()
+        self.convert_ids2objects(self._json_params, self.Model)
         self.set_public_limits()
         if self.request.method == 'PUT':
             self.fill_null_values()
@@ -228,21 +228,22 @@ class BaseView(OptionsViewMixin):
         if self._auth_enabled and not getattr(self.request, 'user', None):
             wrappers.set_public_limits(self)
 
-    def convert_ids2objects(self):
-        """ Convert object IDs from `self._json_params` to objects if needed.
+    @classmethod
+    def convert_ids2objects(cls, obj_dict, model):
+        """ Convert object IDs from a dictionary to objects if needed.
 
-        Only IDs that belong to relationship field of `self.Model`
+        Only IDs that belong to relationship field of `model`
         are converted.
         """
-        if not self.Model:
-            log.info("%s has no model defined" % self.__class__.__name__)
+        if not model:
+            log.info("%s has no model defined" % cls.__name__)
             return
 
-        for field in self._json_params.keys():
-            if not engine.is_relationship_field(field, self.Model):
+        for field in obj_dict:
+            if not engine.is_relationship_field(field, model):
                 continue
-            rel_model_cls = engine.get_relationship_cls(field, self.Model)
-            self.id2obj(field, rel_model_cls)
+            rel_model_cls = engine.get_relationship_cls(field, model)
+            BaseView.id2obj(obj_dict, field, rel_model_cls)
 
     def setup_default_wrappers(self):
         """ Setup defaulf wrappers.
@@ -341,8 +342,9 @@ class BaseView(OptionsViewMixin):
 
         return self.request.invoke_subrequest(req)
 
-    def id2obj(self, name, model, pk_field=None, setdefault=None):
-        if name not in self._json_params:
+    @staticmethod
+    def id2obj(obj_dict, name, model, pk_field=None, setdefault=None):
+        if name not in obj_dict:
             return
 
         if pk_field is None:
@@ -361,16 +363,16 @@ class BaseView(OptionsViewMixin):
                     raise JHTTPBadRequest('id2obj: Object %s not found' % id_)
                 return obj
 
-        ids = self._json_params[name]
+        ids = obj_dict[name]
         if not ids:
             return
         if isinstance(ids, list):
-            self._json_params[name] = []
+            obj_dict[name] = []
             for _id in ids:
                 obj = _id if _id is None else _get_object(_id)
-                self._json_params[name].append(obj)
+                obj_dict[name].append(obj)
         else:
-            self._json_params[name] = ids if ids is None else _get_object(ids)
+            obj_dict[name] = ids if ids is None else _get_object(ids)
 
 
 def key_error_view(context, request):
