@@ -17,7 +17,7 @@ build:
       - pip install -U pytest
       - mkdir -p shippable/testresults
       - mkdir -p shippable/codecoverage
-      - pytest --cov-report xml:shippable/codecoverage/cov.xml --cov-report term --cov ramses tests --junit-xml=shippable/testresults/results.xml
+      - pytest --cov-report xml:shippable/codecoverage/cov.xml --cov-report term --cov nefertari tests --junit-xml=shippable/testresults/results.xml
 
 integrations:
     notifications:
