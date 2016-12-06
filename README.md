@@ -1,5 +1,3 @@
-# `Nefertari`
-[![Build Status](https://travis-ci.org/ramses-tech/nefertari.svg?branch=master)](https://travis-ci.org/ramses-tech/nefertari)
-[![Documentation](https://readthedocs.org/projects/nefertari/badge/?version=stable)](http://nefertari.readthedocs.org)
+# `Nefertari` [![Run Status](https://api.shippable.com/projects/564515061895ca4474235b90/badge?branch=master)](https://app.shippable.com/projects/564515061895ca4474235b90) [![Codacy Badge](https://api.codacy.com/project/badge/Grade/39c4f9b4be6040839788683376927d7d)](https://www.codacy.com/app/Cerri/nefertari?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=geniusproject/nefertari&amp;utm_campaign=Badge_Grade)
 
 Nefertari is a REST API framework sitting on top of [Pyramid](https://github.com/Pylons/pyramid) and [Elasticsearch](https://www.elastic.co/downloads/elasticsearch). She currently offers two backend engines: [SQLA](https://github.com/ramses-tech/nefertari-sqla) and [MongoDB](https://github.com/ramses-tech/nefertari-mongodb).
