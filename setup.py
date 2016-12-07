@@ -8,6 +8,7 @@ VERSION = open(os.path.join(here, 'VERSION')).read()
 
 install_requires = [
     'pyramid',
+    'transaction',
     'tempita',
     'requests',
     'simplejson',

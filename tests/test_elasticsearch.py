@@ -5,8 +5,15 @@ import pytest
 from mock import Mock, patch, call
 from elasticsearch.exceptions import TransportError
 from nefertari import elasticsearch as es
-from nefertari.json_httpexceptions import JHTTPBadRequest, JHTTPNotFound
+from nefertari.json_httpexceptions import JHTTPBadRequest, JHTTPNotFound, JHTTPUnprocessableEntity
 from nefertari.utils import dictset
+
+
+class MockEngine(Mock):
+    def get_document_cls(self, name):
+        mock_document = Mock()
+        mock_document.get_es_mapping = lambda: ({name: {'properties': {}}}, None)
+        return mock_document
 
 
 class TestESHttpConnection(object):
@@ -570,6 +577,7 @@ class TestES(object):
     def test_add_nested_fields(self):
         pass
 
+    @patch('nefertari.elasticsearch.engine', MockEngine())
     def test_build_search_params_no_body(self):
         es.ES.document_proxies = {'Foo': None}
         obj = es.ES('Foo', 'foondex', chunk_size=122)
@@ -579,13 +587,14 @@ class TestES(object):
         assert sorted(params.keys()) == sorted([
             'body', 'doc_type', 'from_', 'size', 'index'])
         assert params['body'] == {
-            'query': {'query_string': {'query': 'foo:1 AND zoo:2 AND 5'}}}
+            'query': {'bool': {'must': [{'query_string': {'query': 'foo:1 AND zoo:2 AND 5'}}]}}}
         assert params['index'] == 'foondex'
         assert params['doc_type'] == 'Foo'
 
+    @patch('nefertari.elasticsearch.engine', MockEngine())
     def test_build_search_params_no_body_no_qs(self):
         es.ES.document_proxies = {'Foo': None}
-        obj = es.ES('Foo', 'foondex')
+        obj = es.ES('Foo', 'foondex', chunk_size=500)
         params = obj.build_search_params({'_limit': 10})
         assert sorted(params.keys()) == sorted([
             'body', 'doc_type', 'from_', 'size', 'index'])
@@ -593,21 +602,24 @@ class TestES(object):
         assert params['index'] == 'foondex'
         assert params['doc_type'] == 'Foo'
 
+    @patch('nefertari.elasticsearch.engine', MockEngine())
     def test_build_search_params_no_limit(self):
         es.ES.document_proxy.update_document_proxies('Foo', None)
         obj = es.ES('Foo', 'foondex', 123)
         obj.api = Mock()
         obj.api.count.return_value = {'count': 123}
         params = obj.build_search_params({'foo': 1})
-        assert params == {
-            'body': {'query': {'query_string': {'query': 'foo:1'}}},
-            'doc_type': 'Foo',
-            'from_': 0,
-            'index': 'foondex',
-            'size': 123
-        }
+        assert params == {'size': 123, 'doc_type': 'Foo', 'index': 'foondex',
+                          'body': {
+                              'query': {
+                                  'bool': {
+                                      'must': [
+                                          {'query_string': {'query': 'foo:1'}}
+                                      ]}}},
+                          'from_': 0}
         obj.api.count.assert_called_once_with(index='foondex')
 
+    @patch('nefertari.elasticsearch.engine', MockEngine())
     def test_build_search_params_sort(self):
         es.ES.document_proxy.update_document_proxies('Foo', None)
         obj = es.ES('Foo', 'foondex', 100)
@@ -616,24 +628,28 @@ class TestES(object):
         assert sorted(params.keys()) == sorted([
             'body', 'doc_type', 'index', 'sort', 'from_', 'size'])
         assert params['body'] == {
-            'query': {'query_string': {'query': 'foo:1'}}}
+            'query': {'bool': {'must': [{'query_string': {'query': 'foo:1'}}]}}}
         assert params['index'] == 'foondex'
         assert params['doc_type'] == 'Foo'
         assert params['sort'] == 'a:asc,b:desc,c:asc'
 
+    @patch('nefertari.elasticsearch.engine', MockEngine())
     def test_build_search_params_fields(self):
+        es.ES.document_proxy.update_document_proxies('Foo', None)
         es.ES.document_proxies = {'Foo': None}
-        obj = es.ES('Foo', 'foondex')
+        obj = es.ES('Foo', 'foondex', chunk_size=500)
         params = obj.build_search_params({
             'foo': 1, '_fields': ['a'], '_limit': 10})
         assert sorted(params.keys()) == sorted([
             'body', 'doc_type', 'index', 'fields', 'from_', 'size'])
+        print(params['body'])
         assert params['body'] == {
-            'query': {'query_string': {'query': 'foo:1'}}}
+            'query': {'bool': {'must': [{'query_string': {'query': 'foo:1'}}]}}}
         assert params['index'] == 'foondex'
         assert params['doc_type'] == 'Foo'
         assert params['fields'] == ['a']
 
+    @patch('nefertari.elasticsearch.engine', MockEngine())
     def test_build_search_params_search_fields(self):
         es.ES.document_proxy.update_document_proxies('Foo', None)
         obj = es.ES('Foo', 'foondex', 200)
@@ -641,38 +657,28 @@ class TestES(object):
             'foo': 1, '_search_fields': 'a,b', '_limit': 10})
         assert sorted(params.keys()) == sorted([
             'body', 'doc_type', 'from_', 'size', 'index'])
-        assert params['body'] == {'query': {'query_string': {
-            'fields': ['b^1', 'a^2'],
-            'query': 'foo:1'}}}
+
+        assert params['body'] == {
+            'query': {'bool': {'must': [{'query_string': {
+                'query': 'foo:1', 'fields': ['b^1', 'a^2']}}]}}}
         assert params['index'] == 'foondex'
         assert params['doc_type'] == 'Foo'
 
     def test_build_search_params_with_body(self):
         es.ES.document_proxy.update_document_proxies('Foo', None)
         obj = es.ES('Foo', 'foondex', 100)
-        params = obj.build_search_params({
-            'body': {'query': {'query_string': 'foo'}},
-            '_raw_terms': ' AND q:5',
-            '_limit': 10,
-            '_search_fields': 'a,b',
-            '_fields': ['a'],
-            '_sort': '+a,-b,c',
-        })
-        assert sorted(params.keys()) == sorted([
-            'body', 'doc_type', 'fields', 'from_', 'index', 'size',
-            'sort'])
-        assert params['body'] == {
-            'query': {
-                'query_string': {
-                    'fields': ['b^1', 'a^2'],
-                    'query': 'foo'
-                }
-            }
-        }
-        assert params['index'] == 'foondex'
-        assert params['doc_type'] == 'Foo'
-        assert params['fields'] == ['a']
-        assert params['sort'] == 'a:asc,b:desc,c:asc'
+
+        with pytest.raises(JHTTPUnprocessableEntity) as ex:
+
+            obj.build_search_params({
+                'body': {'query': {'query_string': 'foo'}},
+                '_raw_terms': ' AND q:5',
+                '_limit': 10,
+                '_search_fields': 'a,b',
+                '_fields': ['a'],
+                '_sort': '+a,-b,c',
+            })
+            assert str(ex.value) == 'Illegal parameter "body"'
 
     @patch('nefertari.elasticsearch.ES.api.count')
     def test_do_count(self, mock_count):
@@ -750,20 +756,19 @@ class TestES(object):
         mock_count.assert_called_once_with({'foo': 'bar'})
         mock_build.assert_called_once_with({'_count': True, 'foo': 1})
 
-    @patch('nefertari.elasticsearch.ES.do_count')
-    @patch('nefertari.elasticsearch.ES.api')
-    def test_get_collection_count_with_body(self, mock_api, mock_count):
+    def test_get_collection_count_with_body(self):
         obj = es.ES('Foo', 'foondex', 100)
-        obj.get_collection(_count=True, foo=1, body={'foo': 'bar'})
-        mock_count.assert_called_once_with({
-            'body': {'foo': 'bar'}, 'doc_type': 'Foo',
-            'from_': 0, 'size': 1, 'index': 'foondex'})
+        with pytest.raises(JHTTPUnprocessableEntity) as ex:
+            obj.get_collection(_count=True, foo=1, body={'foo': 'bar'})
+            assert str(ex.value) == 'Illegal parameter "body"'
 
     @patch('nefertari.elasticsearch.ES.api.search')
-    def test_get_collection_fields(self, mock_search):
+    @patch('nefertari.elasticsearch.ES.api')
+    @patch('nefertari.elasticsearch.engine', MockEngine())
+    def test_get_collection_fields(self, mock_api, mock_search):
         es.ES.document_proxy.update_document_proxies('Foo', None)
         es.ES.document_proxy.update_document_proxies('Zoo', None)
-        obj = es.ES('Foo', 'foondex')
+        obj = es.ES('Foo', 'foondex', chunk_size=500)
         mock_search.return_value = {
             'hits': {
                 'hits': [{'_source': {'foo': 'bar', 'id': 1}, '_score': 2,
@@ -773,9 +778,10 @@ class TestES(object):
             'took': 2.8,
         }
         docs = obj.get_collection(
-            _fields=['foo'], body={'foo': 'bar'}, from_=0)
+            _fields=['foo'], foo='bar', from_=0)
         mock_search.assert_called_once_with(
-            body={'foo': 'bar'}, doc_type='Foo', index='foondex',
+            body={'query': {'bool': {'must': [{'query_string': {'query': 'foo:bar AND from_:0'}}]}}},
+            doc_type='Foo', index='foondex',
             _source_include=['foo', '_type'], _source=True,
             from_=0, size=1)
         assert len(docs) == 1
@@ -790,9 +796,13 @@ class TestES(object):
         assert docs._nefertari_meta['took'] == 2.8
 
     @patch('nefertari.elasticsearch.ES.api.search')
-    def test_get_collection_source(self, mock_search):
+    @patch('nefertari.elasticsearch.ES.api')
+    @patch('nefertari.elasticsearch.engine', MockEngine())
+    def test_get_collection_source(self, mock_api, mock_search):
+        es.ES.document_proxy.update_document_proxies('Foo', None)
+        es.ES.document_proxy.update_document_proxies('Zoo', None)
         es.ES.document_proxies = {'Foo': None, 'Foo2': None, 'Zoo': None}
-        obj = es.ES('Foo', 'foondex')
+        obj = es.ES('Foo', 'foondex', chunk_size=500)
         mock_search.return_value = {
             'hits': {
                 'hits': [{
@@ -803,9 +813,10 @@ class TestES(object):
             },
             'took': 2.8,
         }
-        docs = obj.get_collection(body={'foo': 'bar'}, from_=0)
+        docs = obj.get_collection(foo='bar', from_=0)
         mock_search.assert_called_once_with(
-            body={'foo': 'bar'}, doc_type='Foo', from_=0, size=1,
+            body={'query': {'bool': {'must': [{'query_string': {'query': 'foo:bar AND from_:0'}}]}}},
+            doc_type='Foo', from_=0, size=1,
             index='foondex')
         assert len(docs) == 1
         assert docs[0].id == 1
@@ -818,30 +829,36 @@ class TestES(object):
         assert docs._nefertari_meta['took'] == 2.8
 
     @patch('nefertari.elasticsearch.ES.api.search')
-    def test_get_collection_no_index_raise(self, mock_search):
-        obj = es.ES('Foo', 'foondex')
+    @patch('nefertari.elasticsearch.ES.api')
+    @patch('nefertari.elasticsearch.engine', MockEngine())
+    def test_get_collection_no_index_raise(self, mock_api, mock_search):
+        obj = es.ES('Foo', 'foondex', chunk_size=500)
         mock_search.side_effect = es.IndexNotFoundException()
         with pytest.raises(JHTTPNotFound) as ex:
             obj.get_collection(
-                body={'foo': 'bar'}, _raise_on_empty=True,
+                foo='bar', _raise_on_empty=True,
                 from_=0)
         assert 'resource not found (Index does not exist)' in str(ex.value)
 
     @patch('nefertari.elasticsearch.ES.api.search')
-    def test_get_collection_no_index_not_raise(self, mock_search):
-        obj = es.ES('Foo', 'foondex')
+    @patch('nefertari.elasticsearch.ES.api')
+    @patch('nefertari.elasticsearch.engine', MockEngine())
+    def test_get_collection_no_index_not_raise(self, mock_api,  mock_search):
+        obj = es.ES('Foo', 'foondex', chunk_size=500)
         mock_search.side_effect = es.IndexNotFoundException()
         try:
             docs = obj.get_collection(
-                body={'foo': 'bar'}, _raise_on_empty=False,
+                foo='bar', _raise_on_empty=False,
                 from_=0)
         except JHTTPNotFound:
             raise Exception('Unexpected error')
         assert len(docs) == 0
 
     @patch('nefertari.elasticsearch.ES.api.search')
-    def test_get_collection_not_found_raise(self, mock_search):
-        obj = es.ES('Foo', 'foondex')
+    @patch('nefertari.elasticsearch.ES.api')
+    @patch('nefertari.elasticsearch.engine', MockEngine())
+    def test_get_collection_not_found_raise(self, mock_api, mock_search):
+        obj = es.ES('Foo', 'foondex', chunk_size=500)
         mock_search.return_value = {
             'hits': {
                 'hits': [],
@@ -851,11 +868,13 @@ class TestES(object):
         }
         with pytest.raises(JHTTPNotFound):
             obj.get_collection(
-                body={'foo': 'bar'}, _raise_on_empty=True,
+                foo='bar', _raise_on_empty=True,
                 from_=0)
 
     @patch('nefertari.elasticsearch.ES.api.search')
-    def test_get_collection_not_found_not_raise(self, mock_search):
+    @patch('nefertari.elasticsearch.ES.api')
+    @patch('nefertari.elasticsearch.engine', MockEngine())
+    def test_get_collection_not_found_not_raise(self, mock_api, mock_search):
         obj = es.ES('Foo', 'foondex')
         mock_search.return_value = {
             'hits': {
@@ -866,7 +885,7 @@ class TestES(object):
         }
         try:
             docs = obj.get_collection(
-                body={'foo': 'bar'}, _raise_on_empty=False,
+                foo='bar', _raise_on_empty=False,
                 from_=0)
         except JHTTPNotFound:
             raise Exception('Unexpected error')
