@@ -825,11 +825,19 @@ class ES(object):
 
                 search_fields[index] = search_field + '^' + str(index + 1)
 
-            current_qs = _params['body']['query']['query_string']
+            must_query = _params['body']['query']['bool']['must']
+            query_string = {}
 
-            if isinstance(current_qs, str):
-                _params['body']['query']['query_string'] = {'query': current_qs}
-            _params['body']['query']['query_string']['fields'] = search_fields
+            for query_item in must_query:
+                if 'query_string' in query_item:
+                    query_string = query_item
+                    break
+
+            current_qs = query_string.get('query_string', None)
+
+            if current_qs:
+                query_string['query_string']['fields'] = search_fields
+
         return _params
 
     def do_count(self, params):
