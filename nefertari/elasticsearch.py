@@ -835,10 +835,9 @@ class ES(object):
 
             current_qs = query_string.get('query_string', None)
 
-            if isinstance(current_qs, str):
-                query_string['query_string'] = {'query': current_qs}
-            elif current_qs:
+            if current_qs:
                 query_string['query_string']['fields'] = search_fields
+
         return _params
 
     def do_count(self, params):
