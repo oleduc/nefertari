@@ -161,6 +161,7 @@ class apply_privacy(object):
         public_fields = set(getattr(model_cls, '_public_fields', None) or [])
         auth_fields = set(getattr(model_cls, '_auth_fields', None) or [])
         hidden_fields = set(getattr(model_cls, '_hidden_fields', None) or [])
+        injected_fields = getattr(model_cls, '_injected_fields', None) or []
         fields = set(data.keys())
 
         user = getattr(self.request, 'user', None)
@@ -180,6 +181,8 @@ class apply_privacy(object):
                     fields -= hidden_fields
             else:
                 fields.update(hidden_fields)
+
+        fields.update(injected_fields)
 
         fields.update(['_type', '_pk', '_self'])
         if not isinstance(data, dictset):
