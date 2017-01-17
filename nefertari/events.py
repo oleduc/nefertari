@@ -30,14 +30,13 @@ class RequestEvent(object):
         if it is returned by view method.
     """
     def __init__(self, model, view,
-                 fields=None, field=None, initial_state=None, instance=None,
-                 response=None):
+                 fields=None, field=None, initial_state=None, deleted=None, instance=None, response=None):
         self.model = model
         self.view = view
         self.fields = fields
         self.field = field
         self.initial_state = initial_state
-        self.deleted = getattr(view, 'deleted', None)
+        self.deleted = deleted
         self.instance = instance
         self.response = response
 
@@ -316,6 +315,7 @@ def trigger_events(view_obj):
 
     if do_trigger:
         event_kwargs['response'] = view_obj._response
+        event_kwargs['deleted'] = getattr(view_obj, '_deleted', None)
         after_event = AFTER_EVENTS[event_action]
         request.registry.notify(after_event(**event_kwargs))
 
