@@ -37,6 +37,7 @@ class RequestEvent(object):
         self.fields = fields
         self.field = field
         self.initial_state = initial_state
+        self.deleted = getattr(view, 'deleted', None)
         self.instance = instance
         self.response = response
 
