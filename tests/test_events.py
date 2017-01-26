@@ -47,12 +47,15 @@ class TestEvents(object):
         ctx.__class__.is_ESMetaclass = True
 
         mock_initial_state = Mock()
+        mock_deleted = Mock()
         view = Mock(
             request=Mock(action='index'),
             _json_params={'bar': 1},
             context=ctx,
             _silent=False,
-            initial_state=mock_initial_state)
+            initial_state=mock_initial_state,
+            _deleted=mock_deleted,
+        )
         view.index._silent = False
         view.index._event_action = None
 
@@ -62,8 +65,14 @@ class TestEvents(object):
                     pass
 
         mock_after.assert_called_once_with(
-            fields={'foo': 1}, model=view.Model, instance=ctx,
-            view=view, response=view._response, initial_state=mock_initial_state)
+            fields={'foo': 1},
+            model=view.Model,
+            instance=ctx,
+            view=view,
+            response=view._response,
+            initial_state=mock_initial_state,
+            deleted=mock_deleted,
+        )
         mock_before.assert_called_once_with(
             fields={'foo': 1}, model=view.Model, instance=ctx,
             view=view, initial_state=mock_initial_state)
@@ -137,13 +146,16 @@ class TestEvents(object):
         mock_before = Mock()
         ctx = A()
         mock_initial_state = Mock()
+        mock_deleted = Mock()
         view = Mock(
             Model=A,
             request=Mock(action='index'),
             _json_params={'bar': 1},
             context=ctx,
             _silent=False,
-            initial_state=mock_initial_state)
+            initial_state=mock_initial_state,
+            _deleted=mock_deleted,
+        )
         view.index._silent = None
         view.index._event_action = 'delete'
 
@@ -153,8 +165,13 @@ class TestEvents(object):
                     pass
 
         mock_after.assert_called_once_with(
-            fields={'foo': 1}, model=view.Model, view=view,
-            response=view._response, initial_state=mock_initial_state)
+            fields={'foo': 1},
+            model=view.Model,
+            view=view,
+            response=view._response,
+            initial_state=mock_initial_state,
+            deleted=mock_deleted,
+        )
         mock_before.assert_called_once_with(
             fields={'foo': 1}, model=view.Model, view=view, initial_state=mock_initial_state)
         view.request.registry.notify.assert_has_calls([
