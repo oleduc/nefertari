@@ -1,5 +1,4 @@
 import logging
-from hashlib import md5
 
 import six
 from nefertari import engine
