@@ -1,27 +1,62 @@
-from nefertari.es_query import compile_es_query, _get_tokens, _build_tree, apply_analyzer
 from mock import Mock
+import pytest
+
+from nefertari.es_query import compile_es_query, Tokenizer, Buffer, apply_analyzer, Node
+
+
+class TestNode:
+
+    def test_node_tree_first_level(self):
+        tokens = ['(', 'token', ')']
+        tree = Node.build_tree(tokens)
+        assert tree == [['token']]
+
+    def test_node_tree_wrong_level(self):
+        tokens = ['(', 'token', ')', ')']
+        with pytest.raises(ValueError):
+            Node.build_tree(tokens)
+
+    def test_node_tree_second_level(self):
+        tokens = ['(','(', 'token', ')', 'token', '(', 'token', ')', ')']
+        tree = Node.build_tree(tokens)
+        assert tree == [[['token'], 'token', ['token']]]
+
+    def test_node_tree_third_level(self):
+        tokens = ['(', '(', '(', 'token', ')', ')', 'token', '(', 'token', ')', ')']
+        tree = Node.build_tree(tokens)
+        assert tree == [[[['token']], 'token', ['token']]]
+
+
+class TestProcessors:
+    pass
 
 
 class TestESQueryCompilation(object):
 
     def test_build_parse_tokens(self):
         query_string = 'item:value OR item:value'
-        assert ['item:value', 'OR', 'item:value'] == _get_tokens(query_string)
+        tokenizer = Tokenizer()
+        tokens = tokenizer.tokenize(query_string)
+        assert tokens == ['item:value', 'OR', 'item:value']
         query_string = '((item:value OR item:value) AND NOT (item:OR OR item:NOT)) OR true:true'
-        assert _get_tokens(query_string) == ['(', '(', 'item:value', 'OR', 'item:value', ')',
-                                             'AND NOT', '(', 'item:OR', 'OR', 'item:NOT',
-                                             ')', ')', 'OR', 'true:true']
+        tokens = tokenizer.tokenize(query_string)
+        print(tokens)
+        assert tokens == ['(', '(', 'item:value', 'OR', 'item:value', ')',
+                          'AND NOT', '(', 'item:OR', 'OR', 'item:NOT',
+                          ')', ')', 'OR', 'true:true']
 
     def test_remove_top_level_brackets_if_needless(self):
         query_string = '(item:value OR item:value)'
-        tokens = _get_tokens(query_string)
-        tree = _build_tree(tokens)
+        tokenizer = Tokenizer()
+        tokens = tokenizer.tokenize(query_string)
+        tree = Node.build_tree(tokens)
         assert tree == ['item:value', 'OR', 'item:value']
 
     def test_build_tree(self):
         query_string = '(item:value OR item:value) AND ((item:value OR item:value AND complicated:false) OR (item:value OR item:value))'
-        tokens = _get_tokens(query_string)
-        tree = _build_tree(tokens)
+        tokenizer = Tokenizer()
+        tokens = tokenizer.tokenize(query_string)
+        tree = Node.build_tree(tokens)
         assert tree == [['item:value', 'OR', 'item:value'], 'AND',
                         [['item:value', 'OR', 'item:value', 'AND', 'complicated:false'], 'OR',
                          ['item:value', 'OR', 'item:value']]]
@@ -278,4 +313,27 @@ class TestESQueryCompilation(object):
                          {'bool': {'should': [{'term': {'project_id': '2'}}, {'term': {'project_id': '3'}}],
                                    'minimum_should_match': 1}}]}}]}}
 
+    def test_apply_boost(self):
+        query_string = '(assignments.assignee_id:someuse) AND (assignments.is_completed:true)'
+        params = {'es_q': query_string, '_boost': 'assignments.assignee_id:5,assignments.is_completed:10'}
+        result = compile_es_query(params)
+        print(result)
+        assert result == {'bool': {'must': [{'bool': {'must': [{'nested': {'query': {'bool': {
+            'must': [{'term': {'assignments_nested.assignee_id': 'someuse', 'boost': 5}},
+                     {'term': {'assignments_nested.is_completed': 'true', 'boost': 10}}]}},
+                                                        'path': 'assignments_nested'}}]}}]}}
 
+    # def test_spaces(self):
+    #     query_string = '(assignments.assignee_id:some   use) AND (assignments.is_completed:true)'
+    #     params = {'es_q': query_string, '_boost': 'assignments.assignee_id:5,assignments.is_completed:10'}
+    #     result = compile_es_query(params)
+    #     print(result)
+    #     assert result == {'bool': {'must': [{'bool': {'must': [{'nested': {'query': {'bool': {
+    #         'must': [{'match_phrase': {'assignments_nested.assignee_id': 'some   use', 'boost': 5}},
+    #                  {'term': {'assignments_nested.is_completed': 'true', 'boost': 10}}]}},
+    #                                                     'path': 'assignments_nested'}}]}}]}}
+    #
+    # def test_empty_query(self):
+    #     query_string = 'some'
+    #     params = {'es_q': query_string, '_boost': 'assignments.assignee:2'}
+    #     result = compile_es_query(params)

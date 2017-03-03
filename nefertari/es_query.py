@@ -1,4 +1,8 @@
 import re
+from functools import reduce
+
+FINAL_PROCESSOR = ''
+QUERY_KEYWORDS = {'AND', 'OR', 'NOT'}
 
 
 class OperationStack(list):
@@ -6,6 +10,489 @@ class OperationStack(list):
 
     def pop(self, index=None):
         return self.es_keywords[super(OperationStack, self).pop()]
+
+
+class Node:
+    def __init__(self, prev=None, next_=None):
+        self.prev = prev
+        self.next = next_
+        self.values = []
+
+    def parse(self):
+        nodes = []
+        for value in self.values:
+            if isinstance(value, Node):
+                nodes.append(value.parse())
+            else:
+                nodes.append(value)
+        return nodes
+
+    @staticmethod
+    def build_tree(tokens):
+        safe_counter = 0
+        head = Node()
+
+        for token in tokens:
+            if token == '(':
+                head.next = Node(head)
+                head.values.append(head.next)
+                head = head.next
+                safe_counter += 1
+                continue
+            if token == ')':
+                head = head.prev
+                safe_counter -= 1
+                continue
+
+            head.values.append(token)
+
+        if safe_counter:
+            raise ValueError('Wrong numbers of parentheses. Query string could not be parsed')
+
+        return head.parse()
+
+
+class Tokenizer:
+
+    def __init__(self):
+        self.space_counter = 0
+
+    def append(self, buffer, tokens):
+
+        value = buffer.get_value()
+
+        if value not in QUERY_KEYWORDS:
+            cache = buffer.get_cache()
+            if cache != value:
+                if cache:
+                    spaces = buffer.space_counter * ' '
+                    tokens.remove(cache)
+                    tokens.append(spaces.join([cache, value]))
+                else:
+                    tokens.append(value)
+                    buffer.cache(value)
+            else:
+                tokens.append(value)
+            buffer.clean()
+        else:
+            if value == 'NOT':
+                last_value = tokens.pop()
+                tokens.append(' '.join([last_value, value]))
+            else:
+                tokens.append(value)
+            buffer.clean(with_cache=True)
+            buffer.reset_counter()
+
+    def tokenize(self, query_string):
+        """
+        split query string to tokens "(", ")", "field:value", "AND", "AND NOT", "OR", "OR NOT"
+        :param values: string
+        :return: array of tokens
+        """
+
+        tokens = []
+        brackets = {'(', ')'}
+        buffer = Buffer()
+        in_term = False
+
+        for item in query_string:
+            if item == '[':
+                in_term = True
+
+            if item == ']':
+                in_term = False
+
+            if item == ' ' and buffer and not in_term:
+                buffer.increment_counter()
+                self.append(buffer, tokens)
+                continue
+
+            if item in brackets:
+                if buffer:
+                    self.append(buffer, tokens)
+                tokens.append(item)
+                continue
+
+            if item == ' ' and not in_term:
+                buffer.increment_counter()
+                continue
+
+            buffer += item
+
+        if buffer:
+            self.append(buffer, tokens)
+
+        self._remove_needless_parentheses(tokens)
+
+        return tokens
+
+    def _remove_needless_parentheses(self, tokens):
+        """
+        remove top level needless parentheses
+        :param tokens: list of tokens  - "(", ")", terms and keywords
+        :return: list of tokens  -  "(", ")", terms and keywords
+        """
+
+        if '(' not in tokens and ')' not in tokens:
+            return False
+        counter = 0
+        last_bracket_index = False
+
+        for index, token in enumerate(tokens):
+
+            if token == '(':
+                counter += 1
+                continue
+
+            if token == ')':
+                counter -= 1
+                last_bracket_index = index
+                continue
+
+            if counter == 0:
+                if token in QUERY_KEYWORDS:
+                    last_bracket_index = False
+                    break
+
+        if last_bracket_index:
+            for needless_bracket in [last_bracket_index, 0]:
+                removed_token = tokens[needless_bracket]
+                tokens.remove(removed_token)
+            self._remove_needless_parentheses(tokens)
+
+
+class Buffer:
+    def __init__(self, value=''):
+        self.value = value
+        self.cached = ''
+        self.spaces_counter = 0
+
+    def reset_counter(self):
+        self.spaces_counter = 0
+
+    def increment_counter(self):
+        self.spaces_counter += 1
+
+    def get_value(self):
+        return self.value
+
+    def get_cache(self):
+        return self.cached
+
+    def clean(self, with_cache=False):
+        self.value = ''
+        if with_cache:
+            self.cached = ''
+
+    def cache(self, cached):
+        self.cached = cached
+
+    def __bool__(self):
+        return bool(self.value)
+
+    def __eq__(self, other):
+        if isinstance(other, str):
+            return self.value == other
+        raise TypeError()
+
+    def __iadd__(self, other):
+        if isinstance(other, str):
+            self.value += other
+            return self
+        raise TypeError()
+
+    def __contains__(self, item):
+        return item in self.value
+
+
+class BoostParams:
+
+    def __init__(self, boost_params):
+        self.params = reduce(self.aggregate_dict,
+                             map(lambda x: self._tuple_to_dict(smart_split(x)), boost_params),
+                             dict())
+
+    @staticmethod
+    def _tuple_to_dict(items):
+        key, value = items
+        return {key: value}
+
+    @staticmethod
+    def aggregate_dict(a, b):
+        a.update(b)
+        return a
+
+    def __contains__(self, item):
+        return item in self.params
+
+    def __iter__(self):
+        for item in self.params:
+            yield item
+
+    def __getitem__(self, key):
+        return self.params[key]
+
+    def __bool__(self):
+        return bool(self.params)
+
+
+class BoostProcessor:
+    name = 'boost_processor'
+
+    def __init__(self, boost_params):
+        self.boost_params = boost_params
+
+    def rule(self, term):
+        return term.field in self.boost_params or (term.field == '_all' and self.boost_params)
+
+    @staticmethod
+    def next():
+        return FINAL_PROCESSOR
+
+    def __call__(self, term):
+        if term.field == '_all':
+            value = [{term.type: {term.field: term.value}}]
+            value.extend(
+                [{term.type: {field: {term.query_param: term.value, 'boost': self.boost_params[field]}}}
+                 for field in self.boost_params])
+            term.field = 'should'
+            term.type = 'bool'
+            term.value = value
+        else:
+            if term.query_param:
+                term.value = {term.query_param: term.value,
+                              'boost': int(self.boost_params[term.field])}
+
+    def __repr__(self):
+        return self.name
+
+
+class WildCardProcessor:
+    name = 'wildcard_processor'
+
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def rule(term):
+        return '*' in term.value
+
+    @staticmethod
+    def next():
+        return TypeProcessor.name
+
+    def __call__(self, term):
+        term.type = 'wildcard'
+
+    def __repr__(self):
+        return self.name
+
+
+class RangeProcessor:
+    name = 'range_processor'
+
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def rule(term):
+        return term.value.startswith('[') and term.value.endswith(']') and 'TO' in term.value
+
+    @staticmethod
+    def next():
+        return TypeProcessor.name
+
+    def __call__(self, term):
+        term.type = 'range'
+        value = term.value[1:len(term.value) - 1]
+        from_, to = list(map(lambda string: string.strip(), value.split('TO')))
+        value = {}
+
+        if from_ != '_missing_':
+            value.update({'gte': from_})
+        if to != '_missing_':
+            value.update({'lte': to})
+        term.value = value
+
+    def __repr__(self):
+        return self.name
+
+
+class OrProcessor:
+    name = 'or_processor'
+
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def rule(term):
+        return '|' in term.value
+
+    @staticmethod
+    def next():
+        return FINAL_PROCESSOR
+
+    def __call__(self, term):
+        term.value = term.value.split('|')
+
+    def __repr__(self):
+        return self.name
+
+
+class MissingProcessor:
+    name = 'missing_processor'
+
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def rule(term):
+        return term.value == '_missing_'
+
+    @staticmethod
+    def prepare_value(term):
+        return term.field
+
+    @staticmethod
+    def next():
+        return TypeProcessor.name
+
+    def __call__(self, term):
+        term.type = 'missing'
+        term.value = self.prepare_value(term)
+
+    def __repr__(self):
+        return self.name
+
+
+class MatchProcessor:
+    name = 'match_processor'
+
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def rule(term):
+        return (' ' in term.value and not RangeProcessor.rule(term)) or '_all' in term.field
+
+    @staticmethod
+    def next():
+        return WildCardProcessor.name
+
+    def __call__(self, term):
+        term.type = 'match'
+
+    def __repr__(self):
+        return self.name
+
+
+class TypeProcessor:
+    query_params = {'match': 'query', 'term': 'value', 'wildcard': 'value'}
+    name = 'type_processor'
+
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def rule(term):
+        return True
+
+    def __call__(self, term):
+        if term.type is None:
+            term.type = 'term'
+
+        term.query_param = self.query_params.get(term.type)
+
+    @staticmethod
+    def next():
+        return BoostProcessor.name
+
+    def __repr__(self):
+        return self.name
+
+
+class Term:
+
+    def __init__(self, field, value):
+        self.field = field
+        self.value = value
+        self.type = None
+        self.processors = dict()
+
+    def build(self):
+        return {self.type: {self.field: self.value}}
+
+    def apply_processors(self):
+        processors_order = list(self.build_chain())
+        for processor_name in processors_order:
+            self.processors[processor_name](self)
+
+    def build_chain(self):
+        graph = dict()
+        for processor in self.processors:
+
+            next_processor = self.processors[processor].next()
+
+            if next_processor in self.processors:
+                graph[processor] = next_processor
+            else:
+                graph[processor] = FINAL_PROCESSOR
+
+        if len(graph) == 0:
+            return list(self.processors)
+
+        if len(graph) == 1:
+            return graph.popitem()
+
+        generator = self.find_next(graph)
+        return reversed([item for item in generator])
+
+    @staticmethod
+    def find_next(graph, next_=FINAL_PROCESSOR):
+        keys = list(graph.keys())
+
+        def find_conflicts(value):
+            counter = 0
+            for item in graph.values():
+                if item == value:
+                    counter += 1
+            return counter > 1
+
+        while graph.keys():
+            for key in keys:
+                if key in graph and graph[key] == next_:
+                    if not find_conflicts(next_):
+                        next_ = key
+                    del graph[key]
+                    yield key
+        return False
+
+
+class TermBuilder:
+
+    def __init__(self, params):
+        self.params = params
+
+    def __call__(self, item):
+        field, value = smart_split(item)
+        term = Term(field, value)
+        processors = [
+            TypeProcessor(),
+            OrProcessor(),
+            MissingProcessor(),
+            OrProcessor(),
+            RangeProcessor(),
+            WildCardProcessor(),
+            MatchProcessor(),
+            BoostProcessor(BoostParams(self.params)),
+        ]
+
+        for processor in processors:
+            if processor.rule(term):
+                term.processors[processor.name] = processor
+        term.apply_processors()
+
+        return term.build()
 
 
 def apply_analyzer(params, doc_type, get_document_cls):
@@ -29,6 +516,13 @@ def apply_analyzer(params, doc_type, get_document_cls):
 
 def compile_es_query(params):
     query_string = params.pop('es_q')
+    boosted_params = params.pop('_boost', ())
+
+    if boosted_params:
+        boosted_params = list(map(_parse_nested_items, boosted_params.split(',')))
+    term_builder = TermBuilder(boosted_params)
+    tokenizer = Tokenizer()
+
     # compile params as "AND conditions" on the top level of query_string
     for key, value in params.items():
         if key.startswith('_'):
@@ -37,7 +531,7 @@ def compile_es_query(params):
             query_string += ' AND '
             # parse statement
             if '(' in value and ')' in value:
-                values = _get_tokens(re.sub('[()]', '', value))
+                values = tokenizer.tokenize(re.sub('[()]', '', value))
 
                 def attach_key(item):
                     if item != 'OR':
@@ -49,142 +543,21 @@ def compile_es_query(params):
             else:
                 query_string += ':'.join([key, value])
     query_string = _parse_nested_items(query_string)
-    query_tokens = _get_tokens(query_string)
+    query_tokens = tokenizer.tokenize(query_string)
 
     if len(query_tokens) > 1:
-        tree = _build_tree(query_tokens)
-        return {'bool': {'must': [{'bool': _build_es_query(tree)}]}}
+        tree = Node.build_tree(query_tokens)
+        return {'bool': {'must': [{'bool': _build_es_query(tree, term_builder)}]}}
 
     if _is_nested(query_string):
         aggregation = {'bool': {'must': []}}
-        _attach_nested(query_tokens.pop(), aggregation['bool'], 'must')
+        _attach_nested(query_tokens.pop(), aggregation['bool'], 'must', term_builder)
         return aggregation
 
-    return {'bool': {'must': [_parse_term(query_tokens.pop())]}}
+    return {'bool': {'must': [term_builder(query_tokens.pop())]}}
 
 
-def _get_tokens(values):
-    """
-    split query string to tokens "(", ")", "field:value", "AND", "AND NOT", "OR", "OR NOT"
-    :param values: string
-    :return: array of tokens
-    """
-    tokens = []
-    brackets = {'(', ')'}
-    buffer = ''
-    keywords = {'AND', 'OR'}
-    in_term = False
-
-    for item in values:
-
-        if item == '[':
-            in_term = True
-
-        if item == ']':
-            in_term = False
-
-        if item == ' ' and buffer and not in_term:
-            if buffer == 'NOT':
-                tmp = tokens.pop()
-                # check for avoid issue with "field_name:NOT blabla"
-                if tmp in keywords:
-                    tokens.append(' '.join([tmp, buffer.strip()]))
-            else:
-                tokens.append(buffer.strip())
-            buffer = ''
-            continue
-
-        if item in brackets:
-            if buffer:
-                tokens.append(buffer.strip())
-            tokens.append(item)
-            buffer = ''
-            continue
-
-        buffer += item
-
-    if buffer:
-        tokens.append(buffer)
-
-    while True:
-        tokens, removed = _remove_needless_parentheses(tokens)
-        if not removed:
-            break
-
-    return tokens
-
-
-def _build_tree(tokens):
-
-    class Node:
-        def __init__(self, prev=None, next_=None):
-            self.prev = prev
-            self.next = next_
-            self.values = []
-
-        def parse(self):
-            strings = []
-            for value in self.values:
-                if isinstance(value, Node):
-                    strings.append(value.parse())
-                else:
-                    strings.append(value)
-            return strings
-
-    head = Node()
-
-    for token in tokens:
-        if token == '(':
-            head.next = Node(head)
-            head.values.append(head.next)
-            head = head.next
-            continue
-        if token == ')':
-            head = head.prev
-            continue
-
-        head.values.append(token)
-    return head.parse()
-
-
-def _remove_needless_parentheses(tokens):
-    """
-    remove top level needless parentheses
-    :param tokens: list of tokens  - "(", ")", terms and keywords
-    :return: list of tokens  -  "(", ")", terms and keywords
-    """
-
-    if '(' not in tokens and ')' not in tokens:
-        return tokens, False
-    keywords = {'AND', 'OR', 'OR NOT', 'AND NOT'}
-    brackets_count = 0
-    last_bracket_index = False
-
-    for index, token in enumerate(tokens):
-
-        if token == '(':
-            brackets_count += 1
-            continue
-
-        if token == ')':
-            brackets_count -= 1
-            last_bracket_index = index
-            continue
-
-        if brackets_count == 0:
-            if token in keywords:
-                last_bracket_index = False
-                break
-
-    if last_bracket_index:
-        for needless_bracket in [last_bracket_index, 0]:
-            removed_token = tokens[needless_bracket]
-            tokens.remove(removed_token)
-        return tokens, True
-    return tokens, False
-
-
-def _build_es_query(values):
+def _build_es_query(values, term_builder):
     aggregation = {}
     operations_stack = OperationStack()
     values_stack = []
@@ -197,37 +570,37 @@ def _build_es_query(values):
             values_stack.append(value)
 
         if len(operations_stack) == 1 and len(values_stack) == 2:
-            value2 = _extract_value(values_stack.pop())
-            value1 = _extract_value(values_stack.pop())
+            value2 = _extract_value(values_stack.pop(), term_builder)
+            value1 = _extract_value(values_stack.pop(), term_builder)
 
             operation = operations_stack.pop()
             keyword_exists = aggregation.get(operation, False)
 
             if keyword_exists:
-                _attach_item(value2, aggregation, operation)
+                _attach_item(value2, aggregation, operation, term_builder)
             else:
                 if operation == 'must_not':
-                    _attach_item(value1, aggregation, 'must')
-                    _attach_item(value2, aggregation, operation)
+                    _attach_item(value1, aggregation, 'must', term_builder)
+                    _attach_item(value2, aggregation, operation, term_builder)
                 else:
                     for item in [value1, value2]:
-                        _attach_item(item, aggregation, operation)
+                        _attach_item(item, aggregation, operation, term_builder)
 
             values_stack.append(None)
 
     return aggregation
 
 
-def _extract_value(value):
+def _extract_value(value, term_builder):
     is_list = isinstance(value, list)
     if is_list and len(value) > 1:
-        return {'bool': _build_es_query(value)}
+        return {'bool': _build_es_query(value, term_builder)}
     elif is_list and len(value) == 1:
-        return _extract_value(value.pop())
+        return _extract_value(value.pop(), term_builder)
     return value
 
 
-def _attach_item(item, aggregation, operation):
+def _attach_item(item, aggregation, operation, term_builder):
     """
     attach item to already existed operation in aggregation or to new operation in aggregation
     :param item: string
@@ -246,31 +619,11 @@ def _attach_item(item, aggregation, operation):
         aggregation['minimum_should_match'] = 1
 
     if _is_nested(item):
-        _attach_nested(item, aggregation, operation)
+        _attach_nested(item, aggregation, operation, term_builder)
     elif isinstance(item, dict):
         aggregation[operation].append(item)
     else:
-        aggregation[operation].append(_parse_term(item))
-
-
-def _parse_term(item):
-    """
-    parse term, on this level can be implemented rules according to range, term, match and others
-    https://www.elastic.co/guide/en/elasticsearch/reference/2.1/term-level-queries.html
-    :param item: string
-    :return: dict which contains {'term': {field_name: field_value}
-    """
-
-    field, value = smart_split(item)
-
-    if '|' in value:
-        values = value.split('|')
-        return {'bool': {'should': [{'term': {field: value}} for value in values]}}
-    if value == '_missing_':
-        return {'missing': {'field': field}}
-    if value.startswith('[') and value.endswith(']') and 'TO' in value:
-        return _parse_range(field, value[1:len(value) - 1])
-    return {'term': {field: value}}
+        aggregation[operation].append(term_builder(item))
 
 
 def _parse_range(field, value):
@@ -337,7 +690,7 @@ def smart_split(item, split_key=':'):
     return [item[0:split_index], item[split_index + 1:]]
 
 
-def _attach_nested(value, aggregation, operation):
+def _attach_nested(value, aggregation, operation, term_builder):
     """
     apply rules related to nested queries
     https://www.elastic.co/guide/en/elasticsearch/guide/current/nested-query.html
@@ -356,7 +709,7 @@ def _attach_nested(value, aggregation, operation):
             item_path = item['nested'].get('path', False)
             if item_path == path:
                 item['nested']['query']['bool'][invert_operation[operation]]\
-                    .append(_parse_term(value))
+                    .append(term_builder(value))
 
                 if operation == 'should':
                     item['nested']['query']['bool']['minimum_should_match'] = 1
@@ -364,4 +717,5 @@ def _attach_nested(value, aggregation, operation):
                 break
     else:
         existed_items.append({'nested': {
-            'path': path, 'query': {'bool': {invert_operation[operation]: [_parse_term(value)]}}}})
+            'path': path, 'query': {'bool': {invert_operation[operation]:
+                                                 [term_builder(value)]}}}})
