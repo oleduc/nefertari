@@ -1,9 +1,6 @@
 import re
 from functools import reduce
 
-FINAL_PROCESSOR = ''
-QUERY_KEYWORDS = {'AND', 'OR', 'NOT'}
-
 
 class OperationStack(list):
     es_keywords = {'AND': 'must', 'OR': 'should', 'AND NOT': 'must_not'}
@@ -53,21 +50,22 @@ class Node:
 
 
 class Tokenizer:
+    query_keywords = {'AND', 'OR', 'NOT'}
 
     def __init__(self):
-        self.space_counter = 0
+        pass
 
-    def append(self, buffer, tokens):
+    @staticmethod
+    def append(buffer, tokens):
 
         value = buffer.get_value()
 
-        if value not in QUERY_KEYWORDS:
+        if value not in Tokenizer.query_keywords:
             cache = buffer.get_cache()
             if cache != value:
                 if cache:
-                    spaces = buffer.space_counter * ' '
                     tokens.remove(cache)
-                    tokens.append(spaces.join([cache, value]))
+                    tokens.append(buffer.get_spaces().join([cache, value]))
                 else:
                     tokens.append(value)
                     buffer.cache(value)
@@ -81,7 +79,7 @@ class Tokenizer:
             else:
                 tokens.append(value)
             buffer.clean(with_cache=True)
-            buffer.reset_counter()
+            buffer.reset_spaces()
 
     def tokenize(self, query_string):
         """
@@ -103,7 +101,7 @@ class Tokenizer:
                 in_term = False
 
             if item == ' ' and buffer and not in_term:
-                buffer.increment_counter()
+                buffer.add_space()
                 self.append(buffer, tokens)
                 continue
 
@@ -114,7 +112,7 @@ class Tokenizer:
                 continue
 
             if item == ' ' and not in_term:
-                buffer.increment_counter()
+                buffer.reset_spaces()
                 continue
 
             buffer += item
@@ -126,7 +124,8 @@ class Tokenizer:
 
         return tokens
 
-    def _remove_needless_parentheses(self, tokens):
+    @staticmethod
+    def _remove_needless_parentheses(tokens):
         """
         remove top level needless parentheses
         :param tokens: list of tokens  - "(", ")", terms and keywords
@@ -150,7 +149,7 @@ class Tokenizer:
                 continue
 
             if counter == 0:
-                if token in QUERY_KEYWORDS:
+                if token in Tokenizer.query_keywords:
                     last_bracket_index = False
                     break
 
@@ -158,7 +157,7 @@ class Tokenizer:
             for needless_bracket in [last_bracket_index, 0]:
                 removed_token = tokens[needless_bracket]
                 tokens.remove(removed_token)
-            self._remove_needless_parentheses(tokens)
+            Tokenizer._remove_needless_parentheses(tokens)
 
 
 class Buffer:
@@ -167,11 +166,14 @@ class Buffer:
         self.cached = ''
         self.spaces_counter = 0
 
-    def reset_counter(self):
+    def reset_spaces(self):
         self.spaces_counter = 0
 
-    def increment_counter(self):
+    def add_space(self):
         self.spaces_counter += 1
+
+    def get_spaces(self):
+        return self.spaces_counter * ' '
 
     def get_value(self):
         return self.value
@@ -247,9 +249,9 @@ class BoostProcessor:
 
     @staticmethod
     def next():
-        return FINAL_PROCESSOR
+        return FinalProcessor.name
 
-    def __call__(self, term):
+    def apply(self, term):
         if term.field == '_all':
             value = [{term.type: {term.field: term.value}}]
             value.extend(
@@ -263,15 +265,9 @@ class BoostProcessor:
                 term.value = {term.query_param: term.value,
                               'boost': int(self.boost_params[term.field])}
 
-    def __repr__(self):
-        return self.name
-
 
 class WildCardProcessor:
     name = 'wildcard_processor'
-
-    def __init__(self):
-        pass
 
     @staticmethod
     def rule(term):
@@ -281,18 +277,13 @@ class WildCardProcessor:
     def next():
         return TypeProcessor.name
 
-    def __call__(self, term):
+    @staticmethod
+    def apply(term):
         term.type = 'wildcard'
-
-    def __repr__(self):
-        return self.name
 
 
 class RangeProcessor:
     name = 'range_processor'
-
-    def __init__(self):
-        pass
 
     @staticmethod
     def rule(term):
@@ -300,9 +291,10 @@ class RangeProcessor:
 
     @staticmethod
     def next():
-        return TypeProcessor.name
+        return FinalProcessor.name
 
-    def __call__(self, term):
+    @staticmethod
+    def apply(term):
         term.type = 'range'
         value = term.value[1:len(term.value) - 1]
         from_, to = list(map(lambda string: string.strip(), value.split('TO')))
@@ -314,15 +306,9 @@ class RangeProcessor:
             value.update({'lte': to})
         term.value = value
 
-    def __repr__(self):
-        return self.name
-
 
 class OrProcessor:
     name = 'or_processor'
-
-    def __init__(self):
-        pass
 
     @staticmethod
     def rule(term):
@@ -330,46 +316,32 @@ class OrProcessor:
 
     @staticmethod
     def next():
-        return FINAL_PROCESSOR
+        return FinalProcessor.name
 
-    def __call__(self, term):
+    @staticmethod
+    def apply(term):
         term.value = term.value.split('|')
-
-    def __repr__(self):
-        return self.name
 
 
 class MissingProcessor:
     name = 'missing_processor'
-
-    def __init__(self):
-        pass
 
     @staticmethod
     def rule(term):
         return term.value == '_missing_'
 
     @staticmethod
-    def prepare_value(term):
-        return term.field
-
-    @staticmethod
     def next():
         return TypeProcessor.name
 
-    def __call__(self, term):
+    @staticmethod
+    def apply(term):
         term.type = 'missing'
-        term.value = self.prepare_value(term)
-
-    def __repr__(self):
-        return self.name
+        term.value = term.field
 
 
 class MatchProcessor:
     name = 'match_processor'
-
-    def __init__(self):
-        pass
 
     @staticmethod
     def rule(term):
@@ -379,36 +351,45 @@ class MatchProcessor:
     def next():
         return WildCardProcessor.name
 
-    def __call__(self, term):
+    @staticmethod
+    def apply(term):
         term.type = 'match'
-
-    def __repr__(self):
-        return self.name
 
 
 class TypeProcessor:
     query_params = {'match': 'query', 'term': 'value', 'wildcard': 'value'}
     name = 'type_processor'
 
-    def __init__(self):
-        pass
-
     @staticmethod
     def rule(term):
         return True
 
-    def __call__(self, term):
+    @staticmethod
+    def apply(term):
         if term.type is None:
             term.type = 'term'
 
-        term.query_param = self.query_params.get(term.type)
+        term.query_param = TypeProcessor.query_params.get(term.type)
 
     @staticmethod
     def next():
         return BoostProcessor.name
 
-    def __repr__(self):
-        return self.name
+
+class FinalProcessor:
+    name = 'final_processor'
+
+    @staticmethod
+    def rule(term):
+        return True
+
+    @staticmethod
+    def apply(term):
+        pass
+
+    @staticmethod
+    def next():
+        return None
 
 
 class Term:
@@ -425,7 +406,7 @@ class Term:
     def apply_processors(self):
         processors_order = list(self.build_chain())
         for processor_name in processors_order:
-            self.processors[processor_name](self)
+            self.processors[processor_name].apply(self)
 
     def build_chain(self):
         graph = dict()
@@ -433,10 +414,13 @@ class Term:
 
             next_processor = self.processors[processor].next()
 
+            if not next_processor:
+                continue
+
             if next_processor in self.processors:
                 graph[processor] = next_processor
             else:
-                graph[processor] = FINAL_PROCESSOR
+                graph[processor] = FinalProcessor.name
 
         if len(graph) == 0:
             return list(self.processors)
@@ -444,11 +428,10 @@ class Term:
         if len(graph) == 1:
             return graph.popitem()
 
-        generator = self.find_next(graph)
-        return reversed([item for item in generator])
+        return reversed([item for item in self.find_next(graph)])
 
     @staticmethod
-    def find_next(graph, next_=FINAL_PROCESSOR):
+    def find_next(graph, next_=FinalProcessor.name):
         keys = list(graph.keys())
 
         def find_conflicts(value):
@@ -458,13 +441,18 @@ class Term:
                     counter += 1
             return counter > 1
 
-        while graph.keys():
+        for _ in range(len(keys) ** 2):
+
             for key in keys:
                 if key in graph and graph[key] == next_:
                     if not find_conflicts(next_):
                         next_ = key
                     del graph[key]
                     yield key
+
+            if not graph.keys():
+                break
+
         return False
 
 
@@ -477,13 +465,14 @@ class TermBuilder:
         field, value = smart_split(item)
         term = Term(field, value)
         processors = [
-            TypeProcessor(),
-            OrProcessor(),
-            MissingProcessor(),
-            OrProcessor(),
-            RangeProcessor(),
-            WildCardProcessor(),
-            MatchProcessor(),
+            TypeProcessor,
+            OrProcessor,
+            MissingProcessor,
+            OrProcessor,
+            RangeProcessor,
+            WildCardProcessor,
+            MatchProcessor,
+            FinalProcessor,
             BoostProcessor(BoostParams(self.params)),
         ]
 
