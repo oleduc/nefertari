@@ -81,7 +81,8 @@ class Tokenizer:
             buffer.clean(with_cache=True)
             buffer.reset_spaces()
 
-    def tokenize(self, query_string):
+    @staticmethod
+    def tokenize(query_string):
         """
         split query string to tokens "(", ")", "field:value", "AND", "AND NOT", "OR", "OR NOT"
         :param values: string
@@ -102,25 +103,25 @@ class Tokenizer:
 
             if item == ' ' and buffer and not in_term:
                 buffer.add_space()
-                self.append(buffer, tokens)
+                Tokenizer.append(buffer, tokens)
                 continue
 
             if item in brackets:
                 if buffer:
-                    self.append(buffer, tokens)
+                    Tokenizer.append(buffer, tokens)
                 tokens.append(item)
                 continue
 
             if item == ' ' and not in_term:
-                buffer.reset_spaces()
+                buffer.add_space()
                 continue
 
             buffer += item
 
         if buffer:
-            self.append(buffer, tokens)
+            Tokenizer.append(buffer, tokens)
 
-        self._remove_needless_parentheses(tokens)
+        Tokenizer._remove_needless_parentheses(tokens)
 
         return tokens
 
@@ -209,7 +210,7 @@ class Buffer:
 
 class BoostParams:
 
-    def __init__(self, boost_params):
+    def __init__(self, boost_params=None):
         self.params = reduce(self.aggregate_dict,
                              map(lambda x: self._tuple_to_dict(smart_split(x)), boost_params),
                              dict())
@@ -238,7 +239,17 @@ class BoostParams:
         return bool(self.params)
 
 
-class BoostProcessor:
+class BaseProcessor:
+    name = 'base_processor'
+
+    def __eq__(self, other):
+        return self.name == other.name
+
+    def __hash__(self):
+        return hash(self.name)
+
+
+class BoostProcessor(BaseProcessor):
     name = 'boost_processor'
 
     def __init__(self, boost_params):
@@ -249,7 +260,7 @@ class BoostProcessor:
 
     @staticmethod
     def next():
-        return FinalProcessor.name
+        return FinalProcessor
 
     def apply(self, term):
         if term.field == '_all':
@@ -266,7 +277,7 @@ class BoostProcessor:
                               'boost': int(self.boost_params[term.field])}
 
 
-class WildCardProcessor:
+class WildCardProcessor(BaseProcessor):
     name = 'wildcard_processor'
 
     @staticmethod
@@ -275,14 +286,14 @@ class WildCardProcessor:
 
     @staticmethod
     def next():
-        return TypeProcessor.name
+        return TypeProcessor
 
     @staticmethod
     def apply(term):
         term.type = 'wildcard'
 
 
-class RangeProcessor:
+class RangeProcessor(BaseProcessor):
     name = 'range_processor'
 
     @staticmethod
@@ -291,7 +302,7 @@ class RangeProcessor:
 
     @staticmethod
     def next():
-        return FinalProcessor.name
+        return FinalProcessor
 
     @staticmethod
     def apply(term):
@@ -307,7 +318,7 @@ class RangeProcessor:
         term.value = value
 
 
-class OrProcessor:
+class OrProcessor(BaseProcessor):
     name = 'or_processor'
 
     @staticmethod
@@ -316,14 +327,16 @@ class OrProcessor:
 
     @staticmethod
     def next():
-        return FinalProcessor.name
+        return TypeProcessor
 
     @staticmethod
     def apply(term):
-        term.value = term.value.split('|')
+        term.value = [{'term': {term.field: value}} for value in term.value.split('|')]
+        term.field = 'should'
+        term.type = 'bool'
 
 
-class MissingProcessor:
+class MissingProcessor(BaseProcessor):
     name = 'missing_processor'
 
     @staticmethod
@@ -332,31 +345,33 @@ class MissingProcessor:
 
     @staticmethod
     def next():
-        return TypeProcessor.name
+        return FinalProcessor
 
     @staticmethod
     def apply(term):
         term.type = 'missing'
         term.value = term.field
+        term.field = 'field'
 
 
-class MatchProcessor:
+class MatchProcessor(BaseProcessor):
     name = 'match_processor'
 
     @staticmethod
     def rule(term):
+        print(term.value)
         return (' ' in term.value and not RangeProcessor.rule(term)) or '_all' in term.field
 
     @staticmethod
     def next():
-        return WildCardProcessor.name
+        return WildCardProcessor
 
     @staticmethod
     def apply(term):
         term.type = 'match'
 
 
-class TypeProcessor:
+class TypeProcessor(BaseProcessor):
     query_params = {'match': 'query', 'term': 'value', 'wildcard': 'value'}
     name = 'type_processor'
 
@@ -373,10 +388,10 @@ class TypeProcessor:
 
     @staticmethod
     def next():
-        return BoostProcessor.name
+        return BoostProcessor
 
 
-class FinalProcessor:
+class FinalProcessor(BaseProcessor):
     name = 'final_processor'
 
     @staticmethod
@@ -398,40 +413,43 @@ class Term:
         self.field = field
         self.value = value
         self.type = None
-        self.processors = dict()
+        self.processors = []
 
     def build(self):
+        if self.field == 'should':
+            return {self.type: {self.field: self.value}, 'minimum_should_match': 1}
         return {self.type: {self.field: self.value}}
 
     def apply_processors(self):
         processors_order = list(self.build_chain())
+        print(processors_order)
         for processor_name in processors_order:
-            self.processors[processor_name].apply(self)
+            processor_name.apply(self)
 
     def build_chain(self):
         graph = dict()
         for processor in self.processors:
 
-            next_processor = self.processors[processor].next()
-
-            if not next_processor:
-                continue
-
-            if next_processor in self.processors:
+            next_processor = self.find_next_processor(processor)
+            if next_processor and processor not in graph:
                 graph[processor] = next_processor
-            else:
-                graph[processor] = FinalProcessor.name
 
-        if len(graph) == 0:
-            return list(self.processors)
+        return reversed([item for item in self.find_next_vertex(graph)])
 
-        if len(graph) == 1:
-            return graph.popitem()
+    def find_next_processor(self, processor):
+        next_processor = processor.next()
 
-        return reversed([item for item in self.find_next(graph)])
+        if not next_processor:
+            return None
+
+        if next_processor in self.processors:
+            return next_processor
+
+        return self.find_next_processor(next_processor)
 
     @staticmethod
-    def find_next(graph, next_=FinalProcessor.name):
+    def find_next_vertex(graph, next_=FinalProcessor):
+
         keys = list(graph.keys())
 
         def find_conflicts(value):
@@ -458,27 +476,26 @@ class Term:
 
 class TermBuilder:
 
-    def __init__(self, params):
+    def __init__(self, params=()):
         self.params = params
 
     def __call__(self, item):
         field, value = smart_split(item)
         term = Term(field, value)
         processors = [
-            TypeProcessor,
-            OrProcessor,
-            MissingProcessor,
-            OrProcessor,
-            RangeProcessor,
-            WildCardProcessor,
-            MatchProcessor,
-            FinalProcessor,
+            TypeProcessor(),
+            OrProcessor(),
+            MissingProcessor(),
+            RangeProcessor(),
+            WildCardProcessor(),
+            MatchProcessor(),
+            FinalProcessor(),
             BoostProcessor(BoostParams(self.params)),
         ]
 
         for processor in processors:
             if processor.rule(term):
-                term.processors[processor.name] = processor
+                term.processors.append(processor)
         term.apply_processors()
 
         return term.build()
@@ -510,7 +527,6 @@ def compile_es_query(params):
     if boosted_params:
         boosted_params = list(map(_parse_nested_items, boosted_params.split(',')))
     term_builder = TermBuilder(boosted_params)
-    tokenizer = Tokenizer()
 
     # compile params as "AND conditions" on the top level of query_string
     for key, value in params.items():
@@ -520,7 +536,7 @@ def compile_es_query(params):
             query_string += ' AND '
             # parse statement
             if '(' in value and ')' in value:
-                values = tokenizer.tokenize(re.sub('[()]', '', value))
+                values = Tokenizer.tokenize(re.sub('[()]', '', value))
 
                 def attach_key(item):
                     if item != 'OR':
@@ -532,7 +548,7 @@ def compile_es_query(params):
             else:
                 query_string += ':'.join([key, value])
     query_string = _parse_nested_items(query_string)
-    query_tokens = tokenizer.tokenize(query_string)
+    query_tokens = Tokenizer.tokenize(query_string)
 
     if len(query_tokens) > 1:
         tree = Node.build_tree(query_tokens)

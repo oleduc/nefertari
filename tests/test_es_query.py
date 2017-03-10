@@ -1,7 +1,7 @@
 from mock import Mock
 import pytest
 
-from nefertari.es_query import compile_es_query, Tokenizer, Buffer, apply_analyzer, Node
+from nefertari.es_query import compile_es_query, Tokenizer, Buffer, apply_analyzer, Node, TermBuilder
 
 
 class TestNode:
@@ -28,7 +28,70 @@ class TestNode:
 
 
 class TestProcessors:
-    pass
+
+    def test_simple_term(self):
+        term_builder = TermBuilder()
+        assert term_builder('field:value') == {'term': {'field': 'value'}}
+
+    def test_match_term(self):
+        term_builder = TermBuilder()
+        assert term_builder('field:first value and second value') == {'match': {'field': 'first value and second value'}}
+
+    def test_wildcard(self):
+        term_builder = TermBuilder()
+        assert term_builder('field:*value*') == {'wildcard': {'field': '*value*'}}
+
+    def test_range(self):
+        term_builder = TermBuilder()
+        assert term_builder('field:[2 TO 3]') == {'range': {'field': {'gte': '2', 'lte': '3'}}}
+
+    def test_or_statement(self):
+        term_builder = TermBuilder()
+        assert term_builder('field:value_one|value_two') == {
+            'bool': {'should': [{'term': {'field': 'value_one'}},
+                                {'term': {'field': 'value_two'}}]},
+            'minimum_should_match': 1}
+
+    def test_missing_term(self):
+        term_builder = TermBuilder()
+        assert term_builder('username:_missing_') == {'missing': {'field': 'username'}}
+
+    def test_match_boost_term(self):
+        boost_params = ['field:10']
+        term_builder = TermBuilder(boost_params)
+        assert term_builder('field:match value') == {'match': {'field': {'boost': 10, 'query': 'match value'}}}
+
+    def test_boost_term(self):
+        boost_params = ['field:10']
+        term_builder = TermBuilder(boost_params)
+        assert term_builder('field:term') == {
+            'term': {'field': {'boost': 10, 'value': 'term'}}}
+
+    def test_wildcard_boost_term(self):
+        boost_params = ['field:10']
+        term_builder = TermBuilder(boost_params)
+        assert term_builder('field:*value*') == {
+            'wildcard': {'field': {'boost': 10, 'value': '*value*'}}}
+
+    def test_wildcard_all_boost_term(self):
+        boost_params = ['field:10']
+        term_builder = TermBuilder(boost_params)
+        assert term_builder('_all:*value*') == {
+            'bool': {'should': [{'wildcard': {'_all': '*value*'}},
+                                {'wildcard': {'field': {'boost': '10',
+                                                        'value': '*value*'}}}]},
+            'minimum_should_match': 1}
+
+    def test_match_all_boost_term(self):
+        boost_params = ['field:10', 'another_field:12']
+        term_builder = TermBuilder(boost_params)
+        assert term_builder('_all:value and value') == {
+            'bool': {'should': [{'match': {'_all': 'value and value'}},
+                                {'match': {'field': {'boost': '10',
+                                                     'query': 'value and value'}}},
+                                {'match': {'another_field': {'boost': '12',
+                                                     'query': 'value and value'}}}]},
+            'minimum_should_match': 1}
 
 
 class TestESQueryCompilation(object):
@@ -314,26 +377,30 @@ class TestESQueryCompilation(object):
                                    'minimum_should_match': 1}}]}}]}}
 
     def test_apply_boost(self):
-        query_string = '(assignments.assignee_id:someuse) AND (assignments.is_completed:true)'
+        query_string = '(assignments.assignee_id:john) AND (assignments.is_completed:true)'
         params = {'es_q': query_string, '_boost': 'assignments.assignee_id:5,assignments.is_completed:10'}
         result = compile_es_query(params)
-        print(result)
         assert result == {'bool': {'must': [{'bool': {'must': [{'nested': {'query': {'bool': {
-            'must': [{'term': {'assignments_nested.assignee_id': 'someuse', 'boost': 5}},
-                     {'term': {'assignments_nested.is_completed': 'true', 'boost': 10}}]}},
+            'must': [{'term': {'assignments_nested.assignee_id': {'value': 'john', 'boost': 5}}},
+                     {'term': {'assignments_nested.is_completed': {'value': 'true', 'boost': 10}}}]}},
                                                         'path': 'assignments_nested'}}]}}]}}
 
-    # def test_spaces(self):
-    #     query_string = '(assignments.assignee_id:some   use) AND (assignments.is_completed:true)'
-    #     params = {'es_q': query_string, '_boost': 'assignments.assignee_id:5,assignments.is_completed:10'}
-    #     result = compile_es_query(params)
-    #     print(result)
-    #     assert result == {'bool': {'must': [{'bool': {'must': [{'nested': {'query': {'bool': {
-    #         'must': [{'match_phrase': {'assignments_nested.assignee_id': 'some   use', 'boost': 5}},
-    #                  {'term': {'assignments_nested.is_completed': 'true', 'boost': 10}}]}},
-    #                                                     'path': 'assignments_nested'}}]}}]}}
-    #
-    # def test_empty_query(self):
-    #     query_string = 'some'
-    #     params = {'es_q': query_string, '_boost': 'assignments.assignee:2'}
-    #     result = compile_es_query(params)
+    def test_query_with_spaces(self):
+        query_string = '(assignments.assignee_id:john   smith) AND (assignments.is_completed:true)'
+        params = {'es_q': query_string, '_boost': 'assignments.assignee_id:5,assignments.is_completed:10'}
+        result = compile_es_query(params)
+        assert result == {'bool': {'must': [{'bool': {'must': [{'nested': {'query': {'bool': {
+            'must': [{'match': {'assignments_nested.assignee_id': {'query': 'john   smith', 'boost': 5}}},
+                     {'term': {'assignments_nested.is_completed': {'value': 'true', 'boost': 10}}}]}},
+                                                        'path': 'assignments_nested'}}]}}]}}
+
+    def test_query_with_all_and_boost(self):
+        query_string = '_all:*name* AND obj_status:active'
+        params = {'es_q': query_string, '_boost': 'name:10,description:5'}
+        result = compile_es_query(params)
+        assert result == {'bool': {'must': [{'bool': {'must': [{'bool': {
+            'should': [{'wildcard': {'_all': '*name*'}},
+                       {'wildcard': {'name': {'value': '*name*', 'boost': '10'}}},
+                       {'wildcard': {'description': {'value': '*name*', 'boost': '5'}}}]},
+            'minimum_should_match': 1}, {
+            'term': {'obj_status': 'active'}}]}}]}}
