@@ -26,7 +26,7 @@ class Node:
 
     @staticmethod
     def build_tree(tokens):
-        safe_counter = 0
+        parentheses_counter = 0
         head = Node()
 
         for token in tokens:
@@ -34,16 +34,16 @@ class Node:
                 head.next = Node(head)
                 head.values.append(head.next)
                 head = head.next
-                safe_counter += 1
+                parentheses_counter += 1
                 continue
             if token == ')':
                 head = head.prev
-                safe_counter -= 1
+                parentheses_counter -= 1
                 continue
 
             head.values.append(token)
 
-        if safe_counter:
+        if parentheses_counter:
             raise ValueError('Wrong numbers of parentheses. Query string could not be parsed')
 
         return head.parse()
@@ -211,7 +211,7 @@ class Buffer:
 class BoostParams:
 
     def __init__(self, boost_params=None):
-        self.params = reduce(self.aggregate_dict,
+        self.params = reduce(self._aggregate_dict,
                              map(lambda x: self._tuple_to_dict(smart_split(x)), boost_params),
                              dict())
 
@@ -221,7 +221,7 @@ class BoostParams:
         return {key: value}
 
     @staticmethod
-    def aggregate_dict(a, b):
+    def _aggregate_dict(a, b):
         a.update(b)
         return a
 
