@@ -359,7 +359,6 @@ class MatchProcessor(BaseProcessor):
 
     @staticmethod
     def rule(term):
-        print(term.value)
         return (' ' in term.value and not RangeProcessor.rule(term)) or '_all' in term.field
 
     @staticmethod
@@ -417,7 +416,7 @@ class Term:
 
     def build(self):
         if self.field == 'should':
-            return {self.type: {self.field: self.value}, 'minimum_should_match': 1}
+            return {self.type: {self.field: self.value, 'minimum_should_match': 1}}
         return {self.type: {self.field: self.value}}
 
     def apply_processors(self):
