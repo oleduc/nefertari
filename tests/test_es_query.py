@@ -1,7 +1,8 @@
 from mock import Mock
 import pytest
 
-from nefertari.es_query import compile_es_query, Tokenizer, Buffer, apply_analyzer, Node, TermBuilder
+from nefertari.es_query import (compile_es_query, Tokenizer, Buffer, apply_analyzer,
+                                Node, TermBuilder, BoostParams)
 
 
 class TestNode:
@@ -68,6 +69,24 @@ class TestBuffer:
         assert bool(buffer) is False
         buffer += 'item'
         assert bool(buffer) is True
+
+
+class TestBoostParams:
+
+    def test_create_params(self):
+        params = BoostParams(['name:10','description:5'])
+        assert 'description' in params
+        assert 'name' in params
+        assert params['name'] == '10'
+        assert params['description'] == '5'
+
+    def test_params_iter(self):
+        params = BoostParams(['name:10', 'description:5'])
+        keys = ['name', 'description']
+
+        for key in params:
+            assert key in keys
+            keys.remove(key)
 
 
 class TestProcessors:
