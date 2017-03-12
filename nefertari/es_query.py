@@ -422,7 +422,7 @@ class Term:
 
     def apply_processors(self):
         processors_order = list(self.build_chain())
-        print(processors_order)
+
         for processor_name in processors_order:
             processor_name.apply(self)
 
