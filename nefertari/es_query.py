@@ -309,9 +309,8 @@ class RangeProcessor(BaseProcessor):
         """
         convert date range to ES range query.
         https://www.elastic.co/guide/en/elasticsearch/reference/2.1/query-dsl-range-query.html
-        :param field: string, searched field name
-        :param value: string, date range, example [2016-07-10T00:00:00 TO 2016-08-10T01:00:00]
-        :return: dict, {'range': {field_name: {'gte': 2016-07-10T00:00:00, 'lte': 2016-08-10T01:00:00}}
+        parse date range, example [2016-07-10T00:00:00 TO 2016-08-10T01:00:00] to
+        {'range': {field_name: {'gte': 2016-07-10T00:00:00, 'lte': 2016-08-10T01:00:00}}
         """
 
         term.type = 'range'
