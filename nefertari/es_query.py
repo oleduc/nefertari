@@ -306,6 +306,14 @@ class RangeProcessor(BaseProcessor):
 
     @staticmethod
     def apply(term):
+        """
+        convert date range to ES range query.
+        https://www.elastic.co/guide/en/elasticsearch/reference/2.1/query-dsl-range-query.html
+        :param field: string, searched field name
+        :param value: string, date range, example [2016-07-10T00:00:00 TO 2016-08-10T01:00:00]
+        :return: dict, {'range': {field_name: {'gte': 2016-07-10T00:00:00, 'lte': 2016-08-10T01:00:00}}
+        """
+
         term.type = 'range'
         value = term.value[1:len(term.value) - 1]
         from_, to = list(map(lambda string: string.strip(), value.split('TO')))
@@ -628,27 +636,6 @@ def _attach_item(item, aggregation, operation, term_builder):
         aggregation[operation].append(item)
     else:
         aggregation[operation].append(term_builder(item))
-
-
-def _parse_range(field, value):
-    """
-    convert date range to ES range query.
-    https://www.elastic.co/guide/en/elasticsearch/reference/2.1/query-dsl-range-query.html
-    :param field: string, searched field name
-    :param value: string, date range, example [2016-07-10T00:00:00 TO 2016-08-10T01:00:00]
-    :return: dict, {'range': {field_name: {'gte': 2016-07-10T00:00:00, 'lte': 2016-08-10T01:00:00}}
-    """
-
-    from_, to = list(map(lambda string: string.strip(), value.split('TO')))
-    range_ = {'range': {field: {}}}
-
-    if from_ != '_missing_':
-        range_['range'][field].update({'gte': from_})
-
-    if to != '_missing_':
-        range_['range'][field].update({'lte': to})
-
-    return range_
 
 
 # attach _nested to nested_document
