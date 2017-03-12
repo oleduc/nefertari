@@ -27,6 +27,49 @@ class TestNode:
         assert tree == [[[['token']], 'token', ['token']]]
 
 
+class TestBuffer:
+
+    def test_buffer_cache(self):
+        buffer = Buffer()
+        buffer.cache('tmp')
+        assert buffer.get_cache() == 'tmp'
+
+    def test_buffer_iadd(self):
+        buffer = Buffer('tmp')
+        buffer += ' tmp'
+        assert buffer == 'tmp tmp'
+
+    def test_buffer_clean_without_cached_value(self):
+        buffer = Buffer('tmp')
+        buffer.cache('another value')
+        buffer.clean(with_cache=False)
+        buffer.get_cache() == 'another value'
+
+    def test_buffer_clean_with_cached_value(self):
+        buffer = Buffer('tmp')
+        buffer.cache('another value')
+        buffer.clean(with_cache=True)
+        buffer.get_cache() == ''
+
+    def test_buffer_contains_value(self):
+        buffer = Buffer('first item')
+        buffer.cache('value')
+        assert 'first' in buffer
+        assert 'value' not in buffer
+
+    def test_buffer_equals(self):
+        buffer = Buffer('first item')
+        buffer.cache('value')
+        assert 'first item' == buffer
+        assert 'value' != buffer
+
+    def test_buffer_bool(self):
+        buffer = Buffer()
+        assert bool(buffer) is False
+        buffer += 'item'
+        assert bool(buffer) is True
+
+
 class TestProcessors:
 
     def test_simple_term(self):
