@@ -111,8 +111,8 @@ class TestProcessors:
         term_builder = TermBuilder()
         assert term_builder('field:value_one|value_two') == {
             'bool': {'should': [{'term': {'field': 'value_one'}},
-                                {'term': {'field': 'value_two'}}]},
-            'minimum_should_match': 1}
+                                {'term': {'field': 'value_two'}}],
+                     'minimum_should_match': 1}}
 
     def test_missing_term(self):
         term_builder = TermBuilder()
@@ -141,8 +141,8 @@ class TestProcessors:
         assert term_builder('_all:*value*') == {
             'bool': {'should': [{'wildcard': {'_all': '*value*'}},
                                 {'wildcard': {'field': {'boost': '10',
-                                                        'value': '*value*'}}}]},
-            'minimum_should_match': 1}
+                                                        'value': '*value*'}}}],
+                     'minimum_should_match': 1}}
 
     def test_match_all_boost_term(self):
         boost_params = ['field:10', 'another_field:12']
@@ -152,8 +152,8 @@ class TestProcessors:
                                 {'match': {'field': {'boost': '10',
                                                      'query': 'value and value'}}},
                                 {'match': {'another_field': {'boost': '12',
-                                                     'query': 'value and value'}}}]},
-            'minimum_should_match': 1}
+                                                     'query': 'value and value'}}}],
+                     'minimum_should_match': 1}}
 
 
 class TestESQueryCompilation(object):
@@ -463,6 +463,7 @@ class TestESQueryCompilation(object):
         assert result == {'bool': {'must': [{'bool': {'must': [{'bool': {
             'should': [{'wildcard': {'_all': '*name*'}},
                        {'wildcard': {'name': {'value': '*name*', 'boost': '10'}}},
-                       {'wildcard': {'description': {'value': '*name*', 'boost': '5'}}}]},
-            'minimum_should_match': 1}, {
+                       {'wildcard': {'description': {'value': '*name*', 'boost': '5'}}}],
+            'minimum_should_match': 1
+        }}, {
             'term': {'obj_status': 'active'}}]}}]}}
