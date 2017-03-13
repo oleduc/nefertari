@@ -463,7 +463,11 @@ class Term:
             for item in graph.values():
                 if item == value:
                     counter += 1
-            return counter > 1
+
+                if counter > 1:
+                    return True
+            else:
+                return False
 
         for _ in range(len(keys) ** 2):
 
