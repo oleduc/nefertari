@@ -435,9 +435,9 @@ class Term:
     def build_chain(self):
         graph = dict()
         for processor in self.processors:
-
             next_processor = self.find_next_processor(processor)
-            if next_processor and processor not in graph:
+
+            if next_processor:
                 graph[processor] = next_processor
 
         return reversed([item for item in self.find_next_vertex(graph)])
