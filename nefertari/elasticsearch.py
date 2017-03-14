@@ -287,9 +287,6 @@ class ESActionRegistry(metaclass=SingletonMeta):
 
         for action in actions:
             successful, error = action()
-            # retry if indexation failed because of concurrency conflicts
-            if isinstance(error, ConflictError) or isinstance(error, helpers.BulkIndexError):
-                successful, error = action()
 
             if not successful:
                 # handle failed action, maybe schedule reindex round
