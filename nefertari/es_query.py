@@ -1,5 +1,6 @@
 import re
 from functools import reduce
+from abc import abstractmethod
 
 
 class OperationStack(list):
@@ -52,16 +53,13 @@ class Node:
 class Tokenizer:
     query_keywords = {'AND', 'OR', 'NOT'}
 
-    def __init__(self):
-        pass
+    @classmethod
+    def append(cls, buffer, tokens):
 
-    @staticmethod
-    def append(buffer, tokens):
-
-        value = buffer.get_value()
+        value = buffer.value
 
         if value not in Tokenizer.query_keywords:
-            cache = buffer.get_cache()
+            cache = buffer.cached
             if cache != value:
                 if cache:
                     tokens.remove(cache)
@@ -81,8 +79,8 @@ class Tokenizer:
             buffer.clean(with_cache=True)
             buffer.reset_spaces()
 
-    @staticmethod
-    def tokenize(query_string):
+    @classmethod
+    def tokenize(cls, query_string):
         """
         split query string to tokens "(", ")", "field:value", "AND", "AND NOT", "OR", "OR NOT"
         :param values: string
@@ -108,7 +106,7 @@ class Tokenizer:
 
             if item in brackets:
                 if buffer:
-                    Tokenizer.append(buffer, tokens)
+                    cls.append(buffer, tokens)
                 tokens.append(item)
                 continue
 
@@ -125,8 +123,8 @@ class Tokenizer:
 
         return tokens
 
-    @staticmethod
-    def _remove_needless_parentheses(tokens):
+    @classmethod
+    def _remove_needless_parentheses(cls, tokens):
         """
         remove top level needless parentheses
         :param tokens: list of tokens  - "(", ")", terms and keywords
@@ -150,7 +148,7 @@ class Tokenizer:
                 continue
 
             if counter == 0:
-                if token in Tokenizer.query_keywords:
+                if token in cls.query_keywords:
                     last_bracket_index = False
                     break
 
@@ -158,7 +156,7 @@ class Tokenizer:
             for needless_bracket in [last_bracket_index, 0]:
                 removed_token = tokens[needless_bracket]
                 tokens.remove(removed_token)
-            Tokenizer._remove_needless_parentheses(tokens)
+            cls._remove_needless_parentheses(tokens)
 
 
 class Buffer:
@@ -175,12 +173,6 @@ class Buffer:
 
     def get_spaces(self):
         return self.spaces_counter * ' '
-
-    def get_value(self):
-        return self.value
-
-    def get_cache(self):
-        return self.cached
 
     def clean(self, with_cache=False):
         self.value = ''
@@ -247,6 +239,18 @@ class BaseProcessor:
 
     def __hash__(self):
         return hash(self.name)
+
+    @abstractmethod
+    def apply(self):
+        pass
+
+    @abstractmethod
+    def rule(self, term):
+        pass
+
+    @abstractmethod
+    def next(self):
+        pass
 
 
 class BoostProcessor(BaseProcessor):
@@ -466,8 +470,7 @@ class Term:
 
                 if counter > 1:
                     return True
-            else:
-                return False
+            return False
 
         for _ in range(len(keys) ** 2):
 

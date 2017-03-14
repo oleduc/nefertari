@@ -33,7 +33,7 @@ class TestBuffer:
     def test_buffer_cache(self):
         buffer = Buffer()
         buffer.cache('tmp')
-        assert buffer.get_cache() == 'tmp'
+        assert buffer.cached == 'tmp'
 
     def test_buffer_iadd(self):
         buffer = Buffer('tmp')
@@ -44,13 +44,13 @@ class TestBuffer:
         buffer = Buffer('tmp')
         buffer.cache('another value')
         buffer.clean(with_cache=False)
-        buffer.get_cache() == 'another value'
+        assert buffer.cached == 'another value'
 
     def test_buffer_clean_with_cached_value(self):
         buffer = Buffer('tmp')
         buffer.cache('another value')
         buffer.clean(with_cache=True)
-        buffer.get_cache() == ''
+        assert buffer.cached == ''
 
     def test_buffer_contains_value(self):
         buffer = Buffer('first item')
