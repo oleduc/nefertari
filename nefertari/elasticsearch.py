@@ -13,7 +13,7 @@ import six
 
 
 from nefertari.utils import (
-    dictset, dict2proxy, process_limit, split_strip, DataProxy, SingletonMeta)
+    dictset, dict2proxy, process_limit, split_strip, DataProxy, ThreadLocalSingletonMeta)
 from nefertari.json_httpexceptions import (
     JHTTPBadRequest, JHTTPNotFound, exception_response, JHTTPUnprocessableEntity)
 from nefertari import engine, RESERVED_PARAMS
@@ -247,6 +247,7 @@ class DocumentProxy(object):
             return cls.document_proxies[doc_type]
         raise UnknownDocumentProxiesTypeError('You have no proxy for this %s document type' % doc_type)
 
+import threading
 
 class BoundAction(type):
 
@@ -259,31 +260,31 @@ class BoundAction(type):
         return es_action
 
 
-class ESActionRegistry(metaclass=SingletonMeta):
+class ESActionRegistry(metaclass=ThreadLocalSingletonMeta):
 
     def __init__(self):
         self.registry = {}
+
+    def get_hook(self):
+        def transaction_hook(success, transaction):
+            actions = self.registry[transaction]
+            self.registry.clear()
+
+            if success:
+                self.force_indexation(actions=actions)
+
+        return transaction_hook
 
     def subscribe_on_after_commit(self, transaction, es_action):
         if transaction in self.registry:
             self.registry[transaction].append(es_action)
             return
-        transaction.addAfterCommitHook(self.transaction_hook, kws={'transaction': transaction})
+        transaction.addAfterCommitHook(self.get_hook(), kws={'transaction': transaction})
         self.registry[transaction] = [es_action]
 
-    def transaction_hook(self, success, transaction):
-        if success:
-            self.force_indexation(transaction)
-
-    def force_indexation(self, transaction=None):
+    @staticmethod
+    def force_indexation(actions):
         failed_actions = []
-
-        if transaction:
-            actions = self.registry[transaction]
-            del self.registry[transaction]
-        else:
-            actions = [action for actions in self.registry.values() for action in actions]
-            self.registry.clear()
 
         for action in actions:
             successful, error = action()
@@ -319,6 +320,9 @@ class ESAction(metaclass=BoundAction):
         except ElasticsearchException as e:
             return False, e
         return True, None
+
+    def __repr__(self):
+        return '{}'.format(self.params)
 
 
 class ES(object):
