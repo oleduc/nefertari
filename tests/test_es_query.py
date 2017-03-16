@@ -147,13 +147,21 @@ class TestProcessors:
     def test_match_all_boost_term(self):
         boost_params = ['field:10', 'another_field:12']
         term_builder = TermBuilder(boost_params)
-        assert term_builder('_all:value and value') == {
-            'bool': {'should': [{'match': {'_all': 'value and value'}},
+        result = term_builder('_all:value and value')
+        assert 'bool' in result
+        assert 'should' in result['bool']
+        assert 'minimum_should_match' in result['bool']
+        assert result['bool']['minimum_should_match'] == 1
+        expected_terms = [{'match': {'_all': 'value and value'}},
                                 {'match': {'field': {'boost': '10',
                                                      'query': 'value and value'}}},
                                 {'match': {'another_field': {'boost': '12',
-                                                     'query': 'value and value'}}}],
-                     'minimum_should_match': 1}}
+                                                     'query': 'value and value'}}}]
+
+        for term in result['bool']['should']:
+            assert term in expected_terms
+            expected_terms.remove(term)
+
 
 
 class TestESQueryCompilation(object):
@@ -460,10 +468,34 @@ class TestESQueryCompilation(object):
         query_string = '_all:*name* AND obj_status:active'
         params = {'es_q': query_string, '_boost': 'name:10,description:5'}
         result = compile_es_query(params)
-        assert result == {'bool': {'must': [{'bool': {'must': [{'bool': {
-            'should': [{'wildcard': {'_all': '*name*'}},
-                       {'wildcard': {'name': {'value': '*name*', 'boost': '10'}}},
-                       {'wildcard': {'description': {'value': '*name*', 'boost': '5'}}}],
-            'minimum_should_match': 1
-        }}, {
-            'term': {'obj_status': 'active'}}]}}]}}
+        expected_terms = [{'wildcard': {'_all': '*name*'}},
+                          {'wildcard': {'name': {'value': '*name*', 'boost': '10'}}},
+                          {'wildcard': {'description': {'value': '*name*', 'boost': '5'}}}]
+
+        assert 'bool' in result
+        assert 'must' in result['bool']
+        assert len(result['bool']['must']) == 1
+        bool_term = result['bool']['must'][0]
+
+        assert 'bool' in bool_term
+        assert 'must' in bool_term['bool']
+        assert len(bool_term['bool']['must']) == 2
+        assert bool_term['bool']['must'][1] == {'term': {'obj_status': 'active'}}
+
+        bool_term = bool_term['bool']['must'][0]
+
+        assert 'minimum_should_match' in bool_term['bool']
+        assert bool_term['bool']['minimum_should_match'] == 1
+        assert 'should' in bool_term['bool']
+
+        for item in bool_term['bool']['should']:
+            assert item in expected_terms
+            expected_terms.remove(item)
+
+        # {'bool': {'must': [{'bool': {'must': [{'bool': {
+        #     'should': [{'wildcard': {'_all': '*name*'}},
+        #                {'wildcard': {'name': {'value': '*name*', 'boost': '10'}}},
+        #                {'wildcard': {'description': {'value': '*name*', 'boost': '5'}}}],
+        #     'minimum_should_match': 1
+        # }}, {
+        #     'term': {'obj_status': 'active'}}]}}]}}
