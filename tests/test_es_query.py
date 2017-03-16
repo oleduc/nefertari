@@ -491,11 +491,15 @@ class TestESQueryCompilation(object):
         for item in bool_term['bool']['should']:
             assert item in expected_terms
             expected_terms.remove(item)
+'''
+        Expected result:
 
-        # {'bool': {'must': [{'bool': {'must': [{'bool': {
-        #     'should': [{'wildcard': {'_all': '*name*'}},
-        #                {'wildcard': {'name': {'value': '*name*', 'boost': '10'}}},
-        #                {'wildcard': {'description': {'value': '*name*', 'boost': '5'}}}],
-        #     'minimum_should_match': 1
-        # }}, {
-        #     'term': {'obj_status': 'active'}}]}}]}}
+        {'bool': {'must': [{'bool': {'must': [{'bool': {
+            'should': [{'wildcard': {'_all': '*name*'}},
+                       {'wildcard': {'name': {'value': '*name*', 'boost': '10'}}},
+                       {'wildcard': {'description': {'value': '*name*', 'boost': '5'}}}],
+            'minimum_should_match': 1
+        }}, {
+            'term': {'obj_status': 'active'}}]}}]}}
+
+'''
