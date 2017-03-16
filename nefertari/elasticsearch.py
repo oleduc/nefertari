@@ -316,7 +316,7 @@ class ESAction(metaclass=BoundAction):
                 executed_num))
 
             # logs for debug
-            log.error('ES Query PARAMS'.format(self.params))
+            log.error('ES Query PARAMS {}'.format(self.params))
 
             if errors:
                 'Errors {}'.format(errors)
