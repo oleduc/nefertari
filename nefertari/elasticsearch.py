@@ -315,7 +315,11 @@ class ESAction(metaclass=BoundAction):
             log.info('Successfully executed {} Elasticsearch action(s)'.format(
                 executed_num))
 
+            # logs for debug
+            log.error('ES Query PARAMS'.format(self.params))
+
             if errors:
+                'Errors {}'.format(errors)
                 return False, errors
         except ElasticsearchException as e:
             return False, e
