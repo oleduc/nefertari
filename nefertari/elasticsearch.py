@@ -14,8 +14,8 @@ import six
 
 from nefertari.utils import (
     dictset, dict2proxy, process_limit, split_strip, DataProxy, ThreadLocalSingletonMeta)
-from nefertari.json_httpexceptions import (
-    JBase, JHTTPBadRequest, JHTTPNotFound, exception_response, JHTTPUnprocessableEntity)
+from nefertari.json_httpexceptions import (JHTTPBadRequest, JHTTPNotFound,
+                                           exception_response, JHTTPUnprocessableEntity)
 from nefertari import engine, RESERVED_PARAMS
 from nefertari.es_query import compile_es_query, apply_analyzer
 
@@ -317,7 +317,7 @@ class ESAction(metaclass=BoundAction):
             if errors:
                 log.error('Indexation errors {}'.format(errors))
                 return False, errors
-        except (ElasticsearchException, JBase) as e:
+        except Exception as e:
             return False, e
         return True, None
 
