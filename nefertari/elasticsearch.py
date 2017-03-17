@@ -15,7 +15,7 @@ import six
 from nefertari.utils import (
     dictset, dict2proxy, process_limit, split_strip, DataProxy, ThreadLocalSingletonMeta)
 from nefertari.json_httpexceptions import (
-    JHTTPBadRequest, JHTTPNotFound, exception_response, JHTTPUnprocessableEntity)
+    JBase, JHTTPBadRequest, JHTTPNotFound, exception_response, JHTTPUnprocessableEntity)
 from nefertari import engine, RESERVED_PARAMS
 from nefertari.es_query import compile_es_query, apply_analyzer
 
@@ -247,7 +247,6 @@ class DocumentProxy(object):
             return cls.document_proxies[doc_type]
         raise UnknownDocumentProxiesTypeError('You have no proxy for this %s document type' % doc_type)
 
-import threading
 
 class BoundAction(type):
 
@@ -318,7 +317,7 @@ class ESAction(metaclass=BoundAction):
             if errors:
                 log.error('Indexation errors {}'.format(errors))
                 return False, errors
-        except Exception as e:
+        except (ElasticsearchException, JBase) as e:
             return False, e
         return True, None
 
