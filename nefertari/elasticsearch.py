@@ -7,7 +7,7 @@ import os
 
 
 import elasticsearch
-from elasticsearch.exceptions import ConflictError, ElasticsearchException, TransportError
+from elasticsearch.exceptions import ElasticsearchException, TransportError
 from elasticsearch import helpers
 import six
 
@@ -318,7 +318,7 @@ class ESAction(metaclass=BoundAction):
             if errors:
                 log.error('Indexation errors {}'.format(errors))
                 return False, errors
-        except ElasticsearchException as e:
+        except Exception as e:
             return False, e
         return True, None
 
