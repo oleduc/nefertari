@@ -119,9 +119,9 @@ def _bulk_body(documents_actions, request):
     query_params = dictset(query_params)
     refresh_enabled = ES.settings.asbool('enable_refresh_query')
 
-    if '_refresh_index' in query_params and refresh_enabled:
-        kwargs['refresh'] = query_params.asbool('_refresh_index')
-
+    # if '_refresh_index' in query_params and refresh_enabled:
+    #     kwargs['refresh'] = query_params.asbool('_refresh_index')
+    kwargs['refresh'] = query_params.asbool('_refresh_index')
     ESAction(**kwargs)
 
 
