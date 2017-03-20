@@ -266,7 +266,11 @@ class ESActionRegistry(metaclass=ThreadLocalSingletonMeta):
 
     def get_hook(self):
         def transaction_hook(success, transaction):
-            actions = self.registry[transaction]
+            actions = self.registry.get(transaction, False)
+
+            if not actions:
+                return
+
             self.registry.clear()
 
             if success:
