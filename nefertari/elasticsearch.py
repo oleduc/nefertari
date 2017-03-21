@@ -326,7 +326,7 @@ class ESAction(metaclass=BoundAction):
         return True, None
 
     def __repr__(self):
-        return '{}'.format(self.params)
+        return str(self.params)
 
 
 class ES(object):
