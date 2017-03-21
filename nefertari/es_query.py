@@ -1,6 +1,6 @@
 import re
 from functools import reduce
-from abc import abstractmethod
+from abc import abstractmethod, abstractclassmethod
 
 
 class OperationStack(list):
@@ -241,14 +241,14 @@ class BaseProcessor:
         return hash(self.name)
 
     @abstractmethod
-    def apply(self):
+    def apply(self, term):
         pass
 
     @abstractmethod
     def rule(self, term):
         pass
 
-    @abstractmethod
+    @abstractclassmethod
     def next(self):
         pass
 
@@ -262,8 +262,8 @@ class BoostProcessor(BaseProcessor):
     def rule(self, term):
         return term.field in self.boost_params or (term.field == '_all' and self.boost_params)
 
-    @staticmethod
-    def next():
+    @classmethod
+    def next(cls):
         return FinalProcessor
 
     def apply(self, term):
@@ -284,32 +284,30 @@ class BoostProcessor(BaseProcessor):
 class WildCardProcessor(BaseProcessor):
     name = 'wildcard_processor'
 
-    @staticmethod
-    def rule(term):
+    @classmethod
+    def rule(cls, term):
         return '*' in term.value
 
-    @staticmethod
-    def next():
+    @classmethod
+    def next(cls):
         return TypeProcessor
 
-    @staticmethod
-    def apply(term):
+    def apply(self, term):
         term.type = 'wildcard'
 
 
 class RangeProcessor(BaseProcessor):
     name = 'range_processor'
 
-    @staticmethod
-    def rule(term):
+    @classmethod
+    def rule(cls, term):
         return term.value.startswith('[') and term.value.endswith(']') and 'TO' in term.value
 
-    @staticmethod
-    def next():
+    @classmethod
+    def next(cls):
         return FinalProcessor
 
-    @staticmethod
-    def apply(term):
+    def apply(self, term):
         """
         convert date range to ES range query.
         https://www.elastic.co/guide/en/elasticsearch/reference/2.1/query-dsl-range-query.html
@@ -332,16 +330,15 @@ class RangeProcessor(BaseProcessor):
 class OrProcessor(BaseProcessor):
     name = 'or_processor'
 
-    @staticmethod
-    def rule(term):
+    @classmethod
+    def rule(cls, term):
         return '|' in term.value
 
-    @staticmethod
-    def next():
+    @classmethod
+    def next(cls):
         return TypeProcessor
 
-    @staticmethod
-    def apply(term):
+    def apply(self, term):
         term.value = [{'term': {term.field: value}} for value in term.value.split('|')]
         term.field = 'should'
         term.type = 'bool'
@@ -350,16 +347,15 @@ class OrProcessor(BaseProcessor):
 class MissingProcessor(BaseProcessor):
     name = 'missing_processor'
 
-    @staticmethod
-    def rule(term):
+    @classmethod
+    def rule(cls, term):
         return term.value == '_missing_'
 
-    @staticmethod
-    def next():
+    @classmethod
+    def next(cls):
         return FinalProcessor
 
-    @staticmethod
-    def apply(term):
+    def apply(self, term):
         term.type = 'missing'
         term.value = term.field
         term.field = 'field'
@@ -368,16 +364,15 @@ class MissingProcessor(BaseProcessor):
 class MatchProcessor(BaseProcessor):
     name = 'match_processor'
 
-    @staticmethod
-    def rule(term):
+    @classmethod
+    def rule(cls, term):
         return (' ' in term.value and not RangeProcessor.rule(term)) or '_all' in term.field
 
-    @staticmethod
-    def next():
+    @classmethod
+    def next(cls):
         return WildCardProcessor
 
-    @staticmethod
-    def apply(term):
+    def apply(self, term):
         term.type = 'match'
 
 
@@ -385,35 +380,33 @@ class TypeProcessor(BaseProcessor):
     query_params = {'match': 'query', 'term': 'value', 'wildcard': 'value'}
     name = 'type_processor'
 
-    @staticmethod
-    def rule(term):
+    @classmethod
+    def rule(cls, term):
         return True
 
-    @staticmethod
-    def apply(term):
+    @classmethod
+    def apply(cls, term):
         if term.type is None:
             term.type = 'term'
 
         term.query_param = TypeProcessor.query_params.get(term.type)
 
-    @staticmethod
-    def next():
+    def next(self):
         return BoostProcessor
 
 
 class FinalProcessor(BaseProcessor):
     name = 'final_processor'
 
-    @staticmethod
-    def rule(term):
+    @classmethod
+    def rule(cls, term):
         return True
 
-    @staticmethod
-    def apply(term):
+    def apply(self, term):
         pass
 
-    @staticmethod
-    def next():
+    @classmethod
+    def next(cls):
         return None
 
 
