@@ -7,15 +7,15 @@ import os
 
 
 import elasticsearch
-from elasticsearch.exceptions import ConflictError, ElasticsearchException, TransportError
+from elasticsearch.exceptions import ElasticsearchException, TransportError
 from elasticsearch import helpers
 import six
 
 
 from nefertari.utils import (
-    dictset, dict2proxy, process_limit, split_strip, DataProxy, SingletonMeta)
-from nefertari.json_httpexceptions import (
-    JHTTPBadRequest, JHTTPNotFound, exception_response, JHTTPUnprocessableEntity)
+    dictset, dict2proxy, process_limit, split_strip, DataProxy, ThreadLocalSingletonMeta)
+from nefertari.json_httpexceptions import (JHTTPBadRequest, JHTTPNotFound,
+                                           exception_response, JHTTPUnprocessableEntity)
 from nefertari import engine, RESERVED_PARAMS
 from nefertari.es_query import compile_es_query, apply_analyzer
 
@@ -119,8 +119,8 @@ def _bulk_body(documents_actions, request):
     query_params = dictset(query_params)
     refresh_enabled = ES.settings.asbool('enable_refresh_query')
 
-    if '_refresh_index' in query_params and refresh_enabled:
-        kwargs['refresh'] = query_params.asbool('_refresh_index')
+    if refresh_enabled:
+        kwargs['refresh'] = query_params.asbool('_refresh_index', True)
 
     ESAction(**kwargs)
 
@@ -259,37 +259,38 @@ class BoundAction(type):
         return es_action
 
 
-class ESActionRegistry(metaclass=SingletonMeta):
+class ESActionRegistry(metaclass=ThreadLocalSingletonMeta):
 
     def __init__(self):
         self.registry = {}
+
+    def get_hook(self):
+        def transaction_hook(success, transaction):
+            actions = self.registry.get(transaction, False)
+
+            if not actions:
+                return
+
+            self.registry.clear()
+
+            if success:
+                self.force_indexation(actions=actions)
+
+        return transaction_hook
 
     def subscribe_on_after_commit(self, transaction, es_action):
         if transaction in self.registry:
             self.registry[transaction].append(es_action)
             return
-        transaction.addAfterCommitHook(self.transaction_hook, kws={'transaction': transaction})
+        transaction.addAfterCommitHook(self.get_hook(), kws={'transaction': transaction})
         self.registry[transaction] = [es_action]
 
-    def transaction_hook(self, success, transaction):
-        if success:
-            self.force_indexation(transaction)
-
-    def force_indexation(self, transaction=None):
+    @staticmethod
+    def force_indexation(actions):
         failed_actions = []
-
-        if transaction:
-            actions = self.registry[transaction]
-            del self.registry[transaction]
-        else:
-            actions = [action for actions in self.registry.values() for action in actions]
-            self.registry.clear()
 
         for action in actions:
             successful, error = action()
-            # retry if indexation failed because of concurrency conflicts
-            if isinstance(error, ConflictError) or isinstance(error, helpers.BulkIndexError):
-                successful, error = action()
 
             if not successful:
                 # handle failed action, maybe schedule reindex round
@@ -318,10 +319,14 @@ class ESAction(metaclass=BoundAction):
                 executed_num))
 
             if errors:
+                log.error('Indexation errors {}'.format(errors))
                 return False, errors
-        except ElasticsearchException as e:
+        except Exception as e:
             return False, e
         return True, None
+
+    def __repr__(self):
+        return str(self.params)
 
 
 class ES(object):

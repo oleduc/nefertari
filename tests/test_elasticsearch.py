@@ -143,6 +143,30 @@ class TestHelperFunctions(object):
 
     @patch('nefertari.elasticsearch.ES')
     @patch('nefertari.elasticsearch.helpers')
+    def test_bulk_body_missed_refresh_index(self, mock_helpers, mock_es):
+        mock_helpers.bulk.return_value = (1, [])
+        request = Mock()
+        request.params.mixed.return_value = dict()
+        es._bulk_body('foo', request)
+        import transaction
+        transaction.commit()
+        mock_helpers.bulk.assert_called_once_with(
+            client=mock_es.api, refresh=True, actions='foo')
+
+    @patch('nefertari.elasticsearch.ES')
+    @patch('nefertari.elasticsearch.helpers')
+    def test_bulk_body_refresh_index_false(self, mock_helpers, mock_es):
+        mock_helpers.bulk.return_value = (1, [])
+        request = Mock()
+        request.params.mixed.return_value = {'_refresh_index': False}
+        es._bulk_body('foo', request)
+        import transaction
+        transaction.commit()
+        mock_helpers.bulk.assert_called_once_with(
+            client=mock_es.api, refresh=False, actions='foo')
+
+    @patch('nefertari.elasticsearch.ES')
+    @patch('nefertari.elasticsearch.helpers')
     def test_bulk_body_transaction_failed(self, mock_helpers, mock_es):
         mock_helpers.bulk.return_value = (1, [])
         request = Mock()
