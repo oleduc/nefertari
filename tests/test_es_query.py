@@ -1,27 +1,195 @@
-from nefertari.es_query import compile_es_query, _get_tokens, _build_tree, apply_analyzer
 from mock import Mock
+import pytest
+
+from nefertari.es_query import (compile_es_query, Tokenizer, Buffer, apply_analyzer,
+                                Node, TermBuilder, BoostParams)
+
+
+class TestNode:
+
+    def test_node_tree_first_level(self):
+        tokens = ['(', 'token', ')']
+        tree = Node.build_tree(tokens)
+        assert tree == [['token']]
+
+    def test_node_tree_wrong_level(self):
+        tokens = ['(', 'token', ')', ')']
+        with pytest.raises(ValueError):
+            Node.build_tree(tokens)
+
+    def test_node_tree_second_level(self):
+        tokens = ['(','(', 'token', ')', 'token', '(', 'token', ')', ')']
+        tree = Node.build_tree(tokens)
+        assert tree == [[['token'], 'token', ['token']]]
+
+    def test_node_tree_third_level(self):
+        tokens = ['(', '(', '(', 'token', ')', ')', 'token', '(', 'token', ')', ')']
+        tree = Node.build_tree(tokens)
+        assert tree == [[[['token']], 'token', ['token']]]
+
+
+class TestBuffer:
+
+    def test_buffer_cache(self):
+        buffer = Buffer()
+        buffer.cache('tmp')
+        assert buffer.cached == 'tmp'
+
+    def test_buffer_iadd(self):
+        buffer = Buffer('tmp')
+        buffer += ' tmp'
+        assert buffer == 'tmp tmp'
+
+    def test_buffer_clean_without_cached_value(self):
+        buffer = Buffer('tmp')
+        buffer.cache('another value')
+        buffer.clean(with_cache=False)
+        assert buffer.cached == 'another value'
+
+    def test_buffer_clean_with_cached_value(self):
+        buffer = Buffer('tmp')
+        buffer.cache('another value')
+        buffer.clean(with_cache=True)
+        assert buffer.cached == ''
+
+    def test_buffer_contains_value(self):
+        buffer = Buffer('first item')
+        buffer.cache('value')
+        assert 'first' in buffer
+        assert 'value' not in buffer
+
+    def test_buffer_equals(self):
+        buffer = Buffer('first item')
+        buffer.cache('value')
+        assert 'first item' == buffer
+        assert 'value' != buffer
+
+    def test_buffer_bool(self):
+        buffer = Buffer()
+        assert bool(buffer) is False
+        buffer += 'item'
+        assert bool(buffer) is True
+
+
+class TestBoostParams:
+
+    def test_create_params(self):
+        params = BoostParams(['name:10','description:5'])
+        assert 'description' in params
+        assert 'name' in params
+        assert params['name'] == '10'
+        assert params['description'] == '5'
+
+    def test_params_iter(self):
+        params = BoostParams(['name:10', 'description:5'])
+        keys = ['name', 'description']
+
+        for key in params:
+            assert key in keys
+            keys.remove(key)
+
+
+class TestProcessors:
+
+    def test_simple_term(self):
+        term_builder = TermBuilder()
+        assert term_builder('field:value') == {'term': {'field': 'value'}}
+
+    def test_match_term(self):
+        term_builder = TermBuilder()
+        assert term_builder('field:first value and second value') == {'match': {'field': 'first value and second value'}}
+
+    def test_wildcard(self):
+        term_builder = TermBuilder()
+        assert term_builder('field:*value*') == {'wildcard': {'field': '*value*'}}
+
+    def test_range(self):
+        term_builder = TermBuilder()
+        assert term_builder('field:[2 TO 3]') == {'range': {'field': {'gte': '2', 'lte': '3'}}}
+
+    def test_or_statement(self):
+        term_builder = TermBuilder()
+        assert term_builder('field:value_one|value_two') == {
+            'bool': {'should': [{'term': {'field': 'value_one'}},
+                                {'term': {'field': 'value_two'}}],
+                     'minimum_should_match': 1}}
+
+    def test_missing_term(self):
+        term_builder = TermBuilder()
+        assert term_builder('username:_missing_') == {'missing': {'field': 'username'}}
+
+    def test_match_boost_term(self):
+        boost_params = ['field:10']
+        term_builder = TermBuilder(boost_params)
+        assert term_builder('field:match value') == {'match': {'field': {'boost': 10, 'query': 'match value'}}}
+
+    def test_boost_term(self):
+        boost_params = ['field:10']
+        term_builder = TermBuilder(boost_params)
+        assert term_builder('field:term') == {
+            'term': {'field': {'boost': 10, 'value': 'term'}}}
+
+    def test_wildcard_boost_term(self):
+        boost_params = ['field:10']
+        term_builder = TermBuilder(boost_params)
+        assert term_builder('field:*value*') == {
+            'wildcard': {'field': {'boost': 10, 'value': '*value*'}}}
+
+    def test_wildcard_all_boost_term(self):
+        boost_params = ['field:10']
+        term_builder = TermBuilder(boost_params)
+        assert term_builder('_all:*value*') == {
+            'bool': {'should': [{'wildcard': {'_all': '*value*'}},
+                                {'wildcard': {'field': {'boost': '10',
+                                                        'value': '*value*'}}}],
+                     'minimum_should_match': 1}}
+
+    def test_match_all_boost_term(self):
+        boost_params = ['field:10', 'another_field:12']
+        term_builder = TermBuilder(boost_params)
+        result = term_builder('_all:value and value')
+        assert 'bool' in result
+        assert 'should' in result['bool']
+        assert 'minimum_should_match' in result['bool']
+        assert result['bool']['minimum_should_match'] == 1
+        expected_terms = [{'match': {'_all': 'value and value'}},
+                                {'match': {'field': {'boost': '10',
+                                                     'query': 'value and value'}}},
+                                {'match': {'another_field': {'boost': '12',
+                                                     'query': 'value and value'}}}]
+
+        for term in result['bool']['should']:
+            assert term in expected_terms
+            expected_terms.remove(term)
+
 
 
 class TestESQueryCompilation(object):
 
     def test_build_parse_tokens(self):
         query_string = 'item:value OR item:value'
-        assert ['item:value', 'OR', 'item:value'] == _get_tokens(query_string)
+        tokenizer = Tokenizer()
+        tokens = tokenizer.tokenize(query_string)
+        assert tokens == ['item:value', 'OR', 'item:value']
         query_string = '((item:value OR item:value) AND NOT (item:OR OR item:NOT)) OR true:true'
-        assert _get_tokens(query_string) == ['(', '(', 'item:value', 'OR', 'item:value', ')',
-                                             'AND NOT', '(', 'item:OR', 'OR', 'item:NOT',
-                                             ')', ')', 'OR', 'true:true']
+        tokens = tokenizer.tokenize(query_string)
+        print(tokens)
+        assert tokens == ['(', '(', 'item:value', 'OR', 'item:value', ')',
+                          'AND NOT', '(', 'item:OR', 'OR', 'item:NOT',
+                          ')', ')', 'OR', 'true:true']
 
     def test_remove_top_level_brackets_if_needless(self):
         query_string = '(item:value OR item:value)'
-        tokens = _get_tokens(query_string)
-        tree = _build_tree(tokens)
+        tokenizer = Tokenizer()
+        tokens = tokenizer.tokenize(query_string)
+        tree = Node.build_tree(tokens)
         assert tree == ['item:value', 'OR', 'item:value']
 
     def test_build_tree(self):
         query_string = '(item:value OR item:value) AND ((item:value OR item:value AND complicated:false) OR (item:value OR item:value))'
-        tokens = _get_tokens(query_string)
-        tree = _build_tree(tokens)
+        tokenizer = Tokenizer()
+        tokens = tokenizer.tokenize(query_string)
+        tree = Node.build_tree(tokens)
         assert tree == [['item:value', 'OR', 'item:value'], 'AND',
                         [['item:value', 'OR', 'item:value', 'AND', 'complicated:false'], 'OR',
                          ['item:value', 'OR', 'item:value']]]
@@ -278,4 +446,58 @@ class TestESQueryCompilation(object):
                          {'bool': {'should': [{'term': {'project_id': '2'}}, {'term': {'project_id': '3'}}],
                                    'minimum_should_match': 1}}]}}]}}
 
+    def test_apply_boost(self):
+        query_string = '(assignments.assignee_id:john) AND (assignments.is_completed:true)'
+        params = {'es_q': query_string, '_boost': 'assignments.assignee_id:5,assignments.is_completed:10'}
+        result = compile_es_query(params)
+        assert result == {'bool': {'must': [{'bool': {'must': [{'nested': {'query': {'bool': {
+            'must': [{'term': {'assignments_nested.assignee_id': {'value': 'john', 'boost': 5}}},
+                     {'term': {'assignments_nested.is_completed': {'value': 'true', 'boost': 10}}}]}},
+                                                        'path': 'assignments_nested'}}]}}]}}
 
+    def test_query_with_spaces(self):
+        query_string = '(assignments.assignee_id:john   smith) AND (assignments.is_completed:true)'
+        params = {'es_q': query_string, '_boost': 'assignments.assignee_id:5,assignments.is_completed:10'}
+        result = compile_es_query(params)
+        assert result == {'bool': {'must': [{'bool': {'must': [{'nested': {'query': {'bool': {
+            'must': [{'match': {'assignments_nested.assignee_id': {'query': 'john   smith', 'boost': 5}}},
+                     {'term': {'assignments_nested.is_completed': {'value': 'true', 'boost': 10}}}]}},
+                                                        'path': 'assignments_nested'}}]}}]}}
+
+    def test_query_with_all_and_boost(self):
+        query_string = '_all:*name* AND obj_status:active'
+        params = {'es_q': query_string, '_boost': 'name:10,description:5'}
+        result = compile_es_query(params)
+        expected_terms = [{'wildcard': {'_all': '*name*'}},
+                          {'wildcard': {'name': {'value': '*name*', 'boost': '10'}}},
+                          {'wildcard': {'description': {'value': '*name*', 'boost': '5'}}}]
+
+        assert 'bool' in result
+        assert 'must' in result['bool']
+        assert len(result['bool']['must']) == 1
+        bool_term = result['bool']['must'][0]
+
+        assert 'bool' in bool_term
+        assert 'must' in bool_term['bool']
+        assert len(bool_term['bool']['must']) == 2
+        assert bool_term['bool']['must'][1] == {'term': {'obj_status': 'active'}}
+
+        bool_term = bool_term['bool']['must'][0]
+
+        assert 'minimum_should_match' in bool_term['bool']
+        assert bool_term['bool']['minimum_should_match'] == 1
+        assert 'should' in bool_term['bool']
+
+        for item in bool_term['bool']['should']:
+            assert item in expected_terms
+            expected_terms.remove(item)
+
+        # Expected result:
+        #
+        # {'bool': {'must': [{'bool': {'must': [{'bool': {
+        #     'should': [{'wildcard': {'_all': '*name*'}},
+        #                {'wildcard': {'name': {'value': '*name*', 'boost': '10'}}},
+        #                {'wildcard': {'description': {'value': '*name*', 'boost': '5'}}}],
+        #     'minimum_should_match': 1
+        # }}, {
+        #     'term': {'obj_status': 'active'}}]}}]}}
