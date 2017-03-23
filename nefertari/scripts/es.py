@@ -108,7 +108,12 @@ class ESCommand(object):
             self.log.info('Indexing missing `{}` documents'.format(
                 model_name))
             es.index_missing_documents(documents)
-            ESActionRegistry().force_indexation()
+            es_actions = ESActionRegistry()
+
+            for actions in es_actions.registry.values():
+                es_actions.force_indexation(actions=actions)
+
+            es_actions.registry.clear()
 
     def recreate_index(self):
         self.log.info('Deleting index')
