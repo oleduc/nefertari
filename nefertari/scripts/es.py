@@ -149,7 +149,7 @@ def recreate_index(registry):
     ES.delete_index()
     log.info('Creating index')
     create_index_with_settings(settings)
-    self.log.info('Creating mappings')
+    log.info('Creating mappings')
     ES.setup_mappings()
 
 
