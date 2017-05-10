@@ -184,17 +184,13 @@ class ESProcessor(object):
 
     @staticmethod
     def split_collection(limit, n, collection):
-        list_size = math.ceil(limit / n) - 1
+        list_size = (math.ceil(limit / n) - 1) or 1
         iteration = 0
-
-        if not list_size:
-            list_size = 1
 
         for i in range(0, limit, list_size):
             iteration += 1
 
             if iteration == n:
-                #yield i, limit - i
                 yield collection[i:]
                 break
 
