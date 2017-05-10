@@ -3,7 +3,6 @@ import logging
 import math
 from argparse import ArgumentParser
 from multiprocessing import Pool
-from functools import reduce
 from datetime import datetime
 
 from pyramid.paster import bootstrap
@@ -65,7 +64,7 @@ def main(argv=sys.argv):
     processes = options.processes
 
     if options.recreate:
-        recreate_index(app_registry, log)
+        recreate_index(app_registry)
         models = engine.get_document_classes()
         model_names = [
                 name for name, model in models.items()
@@ -254,7 +253,6 @@ class ESTask(object):
         from nefertari import engine
         from pyramid_sqlalchemy import Session
 
-        log = get_logger()
         model = engine.get_document_cls(self.model_name)
 
         chunk_size = int(self.options.chunk or len(ids))
