@@ -2,7 +2,7 @@ import sys
 import logging
 import math
 from argparse import ArgumentParser
-from multiprocessing import Pool
+from multiprocessing import Pool, Process, Queue, Manager
 from datetime import datetime
 
 from pyramid.paster import bootstrap
@@ -72,14 +72,10 @@ def main(argv=sys.argv):
     else:
         model_names = split_strip(options.models)
 
-    tasks_pool = ESTasksPool(model_names, processes, options)
-
+    queue = get_processing_queue(model_names, processes, options)
     pool = Pool(processes)
-
-    processors = map(lambda i: ESProcessor(options=options, pool=tasks_pool, process_id=i,
-                                           model_names=model_names, processes_count=processes),
+    processors = map(lambda i: ESProcessor(options=options, queue=queue, pid=i),
                      range(0, processes))
-
 
     if options.debug:
         _check_results(pool.map(ESProcessor.apply, processors))
@@ -153,107 +149,80 @@ def recreate_index(registry):
     ES.setup_mappings()
 
 
-class ESTasksPool(object):
+def split_collection(limit, n, collection):
+    list_size = (math.ceil(limit / n) - 1) or 1
+    iteration = 0
 
-    def __init__(self, model_names, processes, options):
-        self._pool = {process_id: [] for process_id in range(0, processes)}
-        self.options = options
+    for i in range(0, limit, list_size):
+        iteration += 1
 
-        for model_name in model_names:
-            for process_id in range(0, processes):
-                self._pool[process_id].append(ESTask(model_name, options))
+        if iteration == n:
+            yield collection[i:]
+            break
 
-    def get_task(self, process_id):
-        if not self.is_empty(process_id):
-            return self._pool[process_id].pop()
-        return None
+        yield collection[i: i + list_size]
 
 
-    def is_empty(self, process_id):
-        return len(self._pool[process_id]) == 0
+def get_processing_queue(model_names, processes_count, options):
+    manager = Manager()
+    queue = manager.Queue()
 
-
-class ESProcessor(object):
-
-    def __init__(self, options, pool, process_id, model_names, processes_count):
-        self.options = options
-        self.pool = pool
-        self.id = process_id
-        self.processes_count = processes_count
-        self.model_names = model_names
-
-    @staticmethod
-    def split_collection(limit, n, collection):
-        list_size = (math.ceil(limit / n) - 1) or 1
-        iteration = 0
-
-        for i in range(0, limit, list_size):
-            iteration += 1
-
-            if iteration == n:
-                yield collection[i:]
-                break
-
-            yield collection[i: i + list_size]
-
-    def get_chunks(self):
-        model_chunks = {}
+    def _get_chunks(model_names, processes_count, q):
+        setup_app(options, put_mappings=False)
         from nefertari import engine
         from pyramid_sqlalchemy import Session
+        model_chunks = {}
 
-        for model_name in self.model_names:
+        for model_name in model_names:
             model = engine.get_document_cls(model_name)
             limit = model.get_collection().count()
             table_name = model.__tablename__
             statement = text('SELECT {} FROM public.{}'.format(model.pk_field(), table_name))
             query = Session().query(model).from_statement(statement)
-            items = list(sorted(query.values(model.pk_field())))
-            chunks = list(self.split_collection(limit, self.processes_count, items))
+            items = list(map(lambda item: getattr(item, model.pk_field()) ,sorted(query.values(model.pk_field()))))
+            chunks = list(split_collection(limit, processes_count, items))
+            model_chunks[model_name] = chunks
 
-            if len(chunks) - 1 < self.id:
-                model_chunks[model_name] = tuple()
-                continue
+            for p in range(0, processes_count):
+                if len(chunks) > p:
+                    q.put((model_name, chunks[p]), block=False)
+    p = Process(target=_get_chunks, args=(model_names, processes_count, queue), daemon=True)
+    p.start()
+    return queue
 
-            model_chunks[model_name] = chunks[self.id]
-        return model_chunks
+
+class ESProcessor(object):
+
+    def __init__(self, options, queue, pid):
+        self.options = options
+        self.queue = queue
+        self.id = pid
 
     def __call__(self):
         log = get_logger()
-
         setup_app(self.options, put_mappings=False)
 
-        chunks = self.get_chunks()
         results = []
 
-        while not self.pool.is_empty(self.id):
-            task = self.pool.get_task(self.id)
-            ids = chunks[task.model_name]
-            results.append(task(ids))
+        while True:
+            model_name, ids = self.queue.get()
+            results.append({model_name: self.index_model(model_name, ids)})
+
+            if self.queue.empty():
+                break
 
         log.info('indexing finished for process {} at {}'.format(self.id, str(datetime.now())))
         return results
 
-    @staticmethod
-    def apply(processor):
-        return processor()
-
-
-class ESTask(object):
-
-    def __init__(self, model_name, options):
-        self.model_name = model_name
-        self.options = options
-
-
-    def index_model(self, ids):
+    def index_model(self, model_name, ids):
         from nefertari import engine
         from pyramid_sqlalchemy import Session
 
-        model = engine.get_document_cls(self.model_name)
+        model = engine.get_document_cls(model_name)
 
         chunk_size = int(self.options.chunk or len(ids))
 
-        es = ES(source=self.model_name, index_name=self.options.index, chunk_size=chunk_size)
+        es = ES(source=model_name, index_name=self.options.index, chunk_size=chunk_size)
 
         query_set = Session().query(model).filter(getattr(model, model.pk_field()).in_(ids)).all()
         ids = [getattr(item, item.pk_field()) for item in query_set]
@@ -268,5 +237,6 @@ class ESTask(object):
         es_actions.registry.clear()
         return ids
 
-    def __call__(self, ids):
-        return {self.model_name: self.index_model(ids)}
+    @staticmethod
+    def apply(processor):
+        return processor()
