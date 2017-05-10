@@ -1,8 +1,8 @@
-from argparse import ArgumentParser
 import sys
 import logging
-from multiprocessing import Pool, Process
 import math
+from argparse import ArgumentParser
+from multiprocessing import Pool
 from functools import reduce
 from datetime import datetime
 
@@ -16,16 +16,13 @@ from nefertari.elasticsearch import ES, ESActionRegistry, create_index_with_sett
 from nefertari import engine
 
 
-def main(argv=sys.argv, quiet=False):
+def main(argv=sys.argv):
 
     parser = ArgumentParser(description=__doc__)
 
     parser.add_argument(
             '-c', '--config', help='config.ini (required)',
             required=True)
-    parser.add_argument(
-            '--quiet', help='Quiet mode', action='store_true',
-            default=False)
     parser.add_argument(
             '--params', help='Url-encoded params for each model')
     parser.add_argument('--index', help='Index name', default=None)
@@ -142,6 +139,7 @@ def setup_app(options, put_mappings):
     ES.setup(dictset(registry.settings))
 
     if put_mappings:
+        log.setLevel(logging.INFO)
         ES.setup_mappings()
     return registry
 
@@ -170,6 +168,7 @@ class ESTasksPool(object):
         if not self.is_empty(process_id):
             return self._pool[process_id].pop()
         return None
+
 
     def is_empty(self, process_id):
         return len(self._pool[process_id]) == 0
