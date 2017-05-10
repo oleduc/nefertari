@@ -2,7 +2,7 @@ import sys
 import logging
 import math
 from argparse import ArgumentParser
-from multiprocessing import Pool, Process, Queue, Manager
+from multiprocessing import Pool, Process, Manager
 from datetime import datetime
 
 from pyramid.paster import bootstrap
@@ -200,9 +200,9 @@ class ESProcessor(object):
 
     def __call__(self):
         log = get_logger()
-        setup_app(self.options, put_mappings=False)
-
         results = []
+
+        setup_app(self.options, put_mappings=False)
 
         while True:
             model_name, ids = self.queue.get()
