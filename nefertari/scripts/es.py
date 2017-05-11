@@ -171,7 +171,6 @@ def get_processing_queue(model_names, processes_count, options):
         setup_app(options, put_mappings=False)
         from nefertari import engine
         from pyramid_sqlalchemy import Session
-        model_chunks = {}
 
         for model_name in model_names:
             model = engine.get_document_cls(model_name)
@@ -181,8 +180,7 @@ def get_processing_queue(model_names, processes_count, options):
             query = Session().query(model).from_statement(statement)
             items = list(map(lambda item: getattr(item, model.pk_field()) ,sorted(query.values(model.pk_field()))))
             chunks = list(split_collection(limit, processes_count, items))
-            model_chunks[model_name] = chunks
-
+            
             for p in range(0, processes_count):
                 if len(chunks) > p:
                     q.put((model_name, chunks[p]), block=False)
