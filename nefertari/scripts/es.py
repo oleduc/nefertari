@@ -78,9 +78,9 @@ def main(argv=sys.argv):
                      range(0, processes))
 
     if options.debug:
-        _check_results(pool.map(ESProcessor.apply, processors))
+        _check_results(pool.map(apply, processors))
     else:
-        pool.map(ESProcessor.apply, processors)
+        pool.map(apply, processors)
 
 
 def _check_results(result):
@@ -149,6 +149,10 @@ def recreate_index(registry):
     ES.setup_mappings()
 
 
+def apply(processor):
+    return processor()
+
+
 def split_collection(limit, n, collection):
     list_size = (math.ceil(limit / n) - 1) or 1
     iteration = 0
@@ -180,7 +184,7 @@ def get_processing_queue(model_names, processes_count, options):
             query = Session().query(model).from_statement(statement)
             items = list(map(lambda item: getattr(item, model.pk_field()) ,sorted(query.values(model.pk_field()))))
             chunks = list(split_collection(limit, processes_count, items))
-            
+
             for p in range(0, processes_count):
                 if len(chunks) > p:
                     q.put((model_name, chunks[p]), block=False)
@@ -234,7 +238,3 @@ class ESProcessor(object):
 
         es_actions.registry.clear()
         return ids
-
-    @staticmethod
-    def apply(processor):
-        return processor()
