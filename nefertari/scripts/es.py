@@ -1,12 +1,14 @@
 import sys
 import logging
 import math
+import time
 from argparse import ArgumentParser
-from multiprocessing import Pool, Process, Manager
+from multiprocessing import Process, Manager
 from datetime import datetime
 
 from pyramid.paster import bootstrap
 from pyramid.config import Configurator
+from pyramid_sqlalchemy import BaseObject
 from sqlalchemy import text
 from six.moves import urllib
 
@@ -59,9 +61,9 @@ def main(argv=sys.argv):
     if not options.config:
         return parser.print_help()
 
-    app_registry = setup_app(options=options, put_mappings=True)
-
     processes = options.processes
+    manager = ProcessManager(processes)
+    app_registry = setup_app(options=options, put_mappings=True, lock=manager.app_initialize_lock)
 
     if options.recreate:
         recreate_index(app_registry)
@@ -72,15 +74,18 @@ def main(argv=sys.argv):
     else:
         model_names = split_strip(options.models)
 
-    queue = get_processing_queue(model_names, processes, options)
-    pool = Pool(processes)
-    processors = map(lambda i: ESProcessor(options=options, queue=queue, pid=i),
+    BaseObject.metadata.bind.dispose()
+
+    consumers = map(lambda i: TaskConsumer(options=options, manager=manager),
                      range(0, processes))
 
+    producer = TaskProducer(options=options, model_names=model_names,
+                            manager=manager, consumers_count=processes)
+
+    results = process_tasks(consumers, producer, manager)
+
     if options.debug:
-        _check_results(pool.map(apply, processors))
-    else:
-        pool.map(apply, processors)
+        _check_results(results)
 
 
 def _check_results(result):
@@ -107,6 +112,19 @@ def _check_results(result):
         assert len(initial_dict[model_name]) == items_count
 
 
+def process_tasks(consumers, producer, manager):
+    consumers = list(consumers)
+    producer.start()
+
+    for c in consumers:
+        c.start()
+
+    manager.wait_for_processes()
+    producer.join()
+
+    return manager.results
+
+
 def get_logger():
     log = logging.getLogger()
     log.setLevel(logging.WARNING)
@@ -117,26 +135,28 @@ def get_logger():
     return log
 
 
-def setup_app(options, put_mappings):
+def setup_app(options, put_mappings, lock):
     # Prevent ES.setup_mappings running on bootstrap;
     # Restore ES._mappings_setup after bootstrap is over
     log = get_logger()
     mappings_setup = getattr(ES, '_mappings_setup', False)
-    try:
-        ES._mappings_setup = True
-        env = bootstrap(options.config)
-    finally:
-        ES._mappings_setup = mappings_setup
-    registry = env['registry']
-    # Include 'nefertari.engine' to setup specific engine
-    config = Configurator(settings=registry.settings)
-    config.include('nefertari.engine')
-    ES.setup(dictset(registry.settings))
 
-    if put_mappings:
-        log.setLevel(logging.INFO)
+    with lock:
+        try:
+            ES._mappings_setup = True
+            env = bootstrap(options.config)
+        finally:
+            ES._mappings_setup = mappings_setup
+        registry = env['registry']
+        # Include 'nefertari.engine' to setup specific engine
+        config = Configurator(settings=registry.settings)
+        config.include('nefertari.engine')
+        ES.setup(dictset(registry.settings))
+        if put_mappings:
+            log.setLevel(logging.INFO)
         ES.setup_mappings()
     return registry
+
 
 def recreate_index(registry):
     log = get_logger()
@@ -149,76 +169,126 @@ def recreate_index(registry):
     ES.setup_mappings()
 
 
-def apply(processor):
-    return processor()
+class TaskProducer(Process):
 
+    def __init__(self, *args, **kwargs):
+        self.model_names = kwargs.pop('model_names')
+        self.consumers_count = kwargs.pop('consumers_count')
+        self.options = kwargs.pop('options')
+        self.manager = kwargs.pop('manager')
+        super().__init__(*args, **kwargs)
 
-def split_collection(limit, n, collection):
-    list_size = (math.ceil(limit / n) - 1) or 1
-    iteration = 0
+    def run(self, *args, **kwargs):
+        setup_app(self.options, put_mappings=False, lock=self.manager.app_initialize_lock)
 
-    for i in range(0, limit, list_size):
-        iteration += 1
-
-        if iteration == n:
-            yield collection[i:]
-            break
-
-        yield collection[i: i + list_size]
-
-
-def get_processing_queue(model_names, processes_count, options):
-    manager = Manager()
-    queue = manager.Queue()
-
-    def _get_chunks(model_names, processes_count, q):
-        setup_app(options, put_mappings=False)
+        from sqlalchemy.orm import sessionmaker
+        from pyramid_sqlalchemy import BaseObject
         from nefertari import engine
-        from pyramid_sqlalchemy import Session
+        from nefertari_sqla.documents import SessionHolder
 
-        for model_name in model_names:
+        self.Session = sessionmaker()
+        self.Session.configure(bind=BaseObject.metadata.bind)
+        SessionHolder().set_session_factory(self.Session)
+
+        for model_name in self.model_names:
             model = engine.get_document_cls(model_name)
             limit = model.get_collection().count()
             table_name = model.__tablename__
             statement = text('SELECT {} FROM public.{}'.format(model.pk_field(), table_name))
-            query = Session().query(model).from_statement(statement)
+            query = self.Session().query(model).from_statement(statement)
             items = list(map(lambda item: getattr(item, model.pk_field()) ,sorted(query.values(model.pk_field()))))
-            chunks = list(split_collection(limit, processes_count, items))
+            chunks = list(TaskProducer.split_collection(limit, self.consumers_count, items))
 
-            for p in range(0, processes_count):
+            for p in range(0, self.consumers_count):
                 if len(chunks) > p:
-                    q.put((model_name, chunks[p]), block=False)
-    p = Process(target=_get_chunks, args=(model_names, processes_count, queue), daemon=True)
-    p.start()
-    return queue
+                    self.manager.tasks.put((model_name, chunks[p]), block=False)
 
+        self.manager.close_task_queue()
 
-class ESProcessor(object):
+    @staticmethod
+    def split_collection(limit, n, collection):
+        list_size = (math.ceil(limit / n) - 1) or 1
+        iteration = 0
 
-    def __init__(self, options, queue, pid):
-        self.options = options
-        self.queue = queue
-        self.id = pid
+        for i in range(0, limit, list_size):
+            iteration += 1
 
-    def __call__(self):
-        log = get_logger()
-        results = []
-
-        setup_app(self.options, put_mappings=False)
-
-        while True:
-            model_name, ids = self.queue.get()
-            results.append({model_name: self.index_model(model_name, ids)})
-
-            if self.queue.empty():
+            if iteration == n:
+                yield collection[i:]
                 break
 
-        log.info('indexing finished for process {} at {}'.format(self.id, str(datetime.now())))
-        return results
+            yield collection[i: i + list_size]
+
+
+class ProcessManager:
+
+    def __init__(self, processes_count):
+        manager = Manager()
+        self.consumers_count = processes_count
+        self.tasks = ClosedQueueAdapter(manager.Queue())
+        self.results = manager.list()
+        self.app_initialize_lock = manager.Semaphore(1)
+        self.consumer_lock = manager.Barrier(processes_count)
+        self.barrier = manager.Barrier(processes_count + 1)
+
+    def close_task_queue(self, *args, **kwrags):
+        while not self.tasks.empty():
+            time.sleep(1)
+
+        self.tasks.close(consumers=range(0, self.consumers_count))
+
+    def wait_for_processes(self):
+        self.barrier.wait()
+
+    def process_finished(self):
+        self.barrier.wait()
+
+    def wait_for_consumers(self):
+        self.consumer_lock.wait()
+
+
+class TaskConsumer(Process):
+
+    def __init__(self, *args, **kwargs):
+        self.options = kwargs.pop('options')
+        self.manager = kwargs.pop('manager')
+        super().__init__(*args, **kwargs)
+
+    def run(self, *args, **kwargs):
+        from pyramid_sqlalchemy import BaseObject
+        from sqlalchemy.orm import sessionmaker
+        from nefertari_sqla.documents import SessionHolder
+
+        log = get_logger()
+        results = []
+        setup_app(self.options, put_mappings=False, lock=self.manager.app_initialize_lock)
+
+        self.manager.wait_for_consumers()
+        self.Session = sessionmaker()
+        self.Session.configure(bind=BaseObject.metadata.bind)
+        SessionHolder().set_session_factory(self.Session)
+
+        while True:
+            try:
+                data = self.manager.tasks.get()
+            except QueueClosedException:
+                break
+
+            model_name, ids = data
+            results.append({model_name: self.index_model(model_name, ids)})
+
+            self.manager.tasks.task_done()
+
+            if self.manager.tasks.empty():
+                break
+
+        log.info('indexing finished for process {} at {}'.format(self.pid, str(datetime.now())))
+        self.manager.results.append(results)
+        self.manager.process_finished()
 
     def index_model(self, model_name, ids):
         from nefertari import engine
-        from pyramid_sqlalchemy import Session
+        print('working with model {}'.format(model_name))
 
         model = engine.get_document_cls(model_name)
 
@@ -226,7 +296,7 @@ class ESProcessor(object):
 
         es = ES(source=model_name, index_name=self.options.index, chunk_size=chunk_size)
 
-        query_set = Session().query(model).filter(getattr(model, model.pk_field()).in_(ids)).all()
+        query_set = self.Session().query(model).filter(getattr(model, model.pk_field()).in_(ids)).all()
         ids = [getattr(item, item.pk_field()) for item in query_set]
         documents = to_indexable_dicts(query_set)
 
@@ -238,3 +308,37 @@ class ESProcessor(object):
 
         es_actions.registry.clear()
         return ids
+
+
+class ClosedQueueAdapter:
+    QUEUE_CLOSED_MESSAGE = 1
+
+    def __init__(self, queue):
+        self.queue = queue
+        self.closed = False
+
+    def close(self, consumers):
+        for _ in consumers:
+            self.queue.put(self.QUEUE_CLOSED_MESSAGE, block=False)
+
+    def get(self, *args, **kwargs):
+        if not self.closed:
+            message = self.queue.get(*args, **kwargs)
+
+            if message is self.QUEUE_CLOSED_MESSAGE:
+                raise QueueClosedException()
+            return message
+        raise QueueClosedException()
+
+    def put(self, *args, **kwargs):
+        return self.queue.put(*args, **kwargs)
+
+    def empty(self, *args, **kwargs):
+        return self.queue.empty(*args, **kwargs)
+
+    def task_done(self, *args, **kwargs):
+        return self.queue.task_done(*args, **kwargs)
+
+
+class QueueClosedException(Exception):
+    pass
