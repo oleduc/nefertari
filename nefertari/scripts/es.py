@@ -76,8 +76,7 @@ def main(argv=sys.argv):
 
     BaseObject.metadata.bind.dispose()
 
-    consumers = map(lambda i: TaskConsumer(options=options, manager=manager),
-                     range(0, processes))
+    consumers = [TaskConsumer(options=options, manager=manager) for _ in range(processes)]
 
     producer = TaskProducer(options=options, model_names=model_names,
                             manager=manager, consumers_count=processes)
@@ -113,13 +112,12 @@ def _check_results(result):
 
 
 def process_tasks(consumers, producer, manager):
-    consumers = list(consumers)
     producer.start()
 
     for c in consumers:
         c.start()
 
-    manager.wait_for_processes()
+    manager.wait_for_exit()
     producer.join()
 
     return manager.results
@@ -237,10 +235,7 @@ class ProcessManager:
 
         self.tasks.close(consumers=range(0, self.consumers_count))
 
-    def wait_for_processes(self):
-        self.barrier.wait()
-
-    def process_finished(self):
+    def wait_for_exit(self):
         self.barrier.wait()
 
     def wait_for_consumers(self):
@@ -284,7 +279,7 @@ class TaskConsumer(Process):
 
         log.info('indexing finished for process {} at {}'.format(self.pid, str(datetime.now())))
         self.manager.results.append(results)
-        self.manager.process_finished()
+        self.manager.wait_for_exit()
 
     def index_model(self, model_name, ids):
         from nefertari import engine
