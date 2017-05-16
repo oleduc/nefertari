@@ -323,6 +323,7 @@ class ClosedQueueAdapter:
             message = self.queue.get(*args, **kwargs)
 
             if message is self.QUEUE_CLOSED_MESSAGE:
+                self.closed = True
                 raise QueueClosedException()
             return message
         raise QueueClosedException()
