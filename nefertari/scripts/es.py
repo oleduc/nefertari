@@ -74,6 +74,8 @@ def main(argv=sys.argv):
     else:
         model_names = split_strip(options.models)
 
+    # Close all existed connections for avoid issue with concurrent access.
+    # more here: http://docs.sqlalchemy.org/en/latest/faq/connections.html#how-do-i-use-engines-connections-sessions-with-python-multiprocessing-or-os-fork
     BaseObject.metadata.bind.dispose()
 
     consumers = [TaskConsumer(options=options, manager=manager) for _ in range(processes)]
