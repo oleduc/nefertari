@@ -178,7 +178,7 @@ class TaskProducer(Process):
         self.manager = kwargs.pop('manager')
         super().__init__(*args, **kwargs)
 
-    def run(self, *args, **kwargs):
+    def run(self):
         setup_app(self.options, put_mappings=False, lock=self.manager.app_initialize_lock)
 
         from sqlalchemy.orm import sessionmaker
@@ -251,7 +251,7 @@ class TaskConsumer(Process):
         self.manager = kwargs.pop('manager')
         super().__init__(*args, **kwargs)
 
-    def run(self, *args, **kwargs):
+    def run(self):
         from pyramid_sqlalchemy import BaseObject
         from sqlalchemy.orm import sessionmaker
         from nefertari_sqla.documents import SessionHolder
