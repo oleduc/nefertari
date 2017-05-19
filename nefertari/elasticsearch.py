@@ -259,7 +259,7 @@ class BoundAction(type):
         return es_action
 
 
-class ESActionRegistry(ThreadLocalSingletonMeta):
+class ESActionRegistry(metaclass=ThreadLocalSingletonMeta):
 
     def __init__(self):
         self.registry = {}
