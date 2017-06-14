@@ -300,12 +300,9 @@ class TaskConsumer(Process):
         documents = to_indexable_dicts(query_set)
 
         es.index_missing_documents(documents)
-        es_actions = ESActionRegistry()
+        with ESActionRegistry() as es_registry:
+            es_registry.index()
 
-        for actions in es_actions.registry.values():
-            es_actions.force_indexation(actions=actions)
-
-        es_actions.registry.clear()
         return ids
 
 
