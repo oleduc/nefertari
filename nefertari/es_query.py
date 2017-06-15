@@ -353,9 +353,14 @@ class Term:
 
     def __init__(self, field, value):
         self.field = field
-        self.value = value
+        self.value = self.filter_quotes(value)
         self.type = None
         self.processors = []
+
+    def filter_quotes(self, value):
+        if value.startswith('"') and value.endswith('"'):
+            return value[1:len(value) - 1]
+        return value
 
     def parse(self):
         if self.field == 'should':

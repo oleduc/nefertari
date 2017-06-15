@@ -472,3 +472,13 @@ class TestESQueryCompilation(object):
         assert result == {'bool': {
             'must': [{'match': {'name': 'Searchtask'}}]}}
 
+    def test_query_with_quotes_in_nested(self):
+        query_string = '(assignments.assignee_id:"qweqweqwe") AND inbox:"testfield"'
+        params = {'es_q': query_string}
+        result = compile_es_query(params)
+        print(result)
+        assert result == {'bool': {'must': [{'bool': {'must': [
+            {'nested': {'query': {'bool': {'must': [
+                {'term': {'assignments_nested.assignee_id': 'qweqweqwe'}}]}}, 'path': 'assignments_nested'}},
+            {'term': {'inbox': 'testfield'}}]}}]}}
+
