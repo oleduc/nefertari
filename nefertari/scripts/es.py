@@ -63,7 +63,7 @@ def main(argv=sys.argv):
 
     processes = options.processes
     manager = ProcessManager(processes)
-    app_registry = setup_app(options=options, put_mappings=True, lock=manager.app_initialize_lock)
+    app_registry = setup_app(options=options, put_mappings=True)
 
     if options.recreate:
         recreate_index(app_registry)
@@ -78,7 +78,7 @@ def main(argv=sys.argv):
     # more here: http://docs.sqlalchemy.org/en/latest/faq/connections.html#how-do-i-use-engines-connections-sessions-with-python-multiprocessing-or-os-fork
     BaseObject.metadata.bind.dispose()
 
-    consumers = [TaskConsumer(options=options, manager=manager) for _ in range(processes)]
+    consumers = [TaskConsumer(options=options, settings=app_registry.settings, manager=manager) for _ in range(processes)]
 
     producer = TaskProducer(options=options, model_names=model_names,
                             manager=manager, consumers_count=processes)
@@ -135,26 +135,26 @@ def get_logger():
     return log
 
 
-def setup_app(options, put_mappings, lock):
+def setup_app(options, put_mappings):
     # Prevent ES.setup_mappings running on bootstrap;
     # Restore ES._mappings_setup after bootstrap is over
     log = get_logger()
     mappings_setup = getattr(ES, '_mappings_setup', False)
 
-    with lock:
-        try:
-            ES._mappings_setup = True
-            env = bootstrap(options.config)
-        finally:
-            ES._mappings_setup = mappings_setup
-        registry = env['registry']
-        # Include 'nefertari.engine' to setup specific engine
-        config = Configurator(settings=registry.settings)
-        config.include('nefertari.engine')
-        ES.setup(dictset(registry.settings))
-        if put_mappings:
-            log.setLevel(logging.INFO)
-        ES.setup_mappings()
+    try:
+        ES._mappings_setup = True
+        env = bootstrap(options.config)
+    finally:
+        ES._mappings_setup = mappings_setup
+    registry = env['registry']
+    # Include 'nefertari.engine' to setup specific engine
+    config = Configurator(settings=registry.settings)
+    config.include('nefertari.engine')
+    ES.setup(dictset(registry.settings))
+    if put_mappings:
+        log.setLevel(logging.INFO)
+    ES.setup_mappings()
+
     return registry
 
 
@@ -179,8 +179,8 @@ class TaskProducer(Process):
         super().__init__(*args, **kwargs)
 
     def run(self):
-        setup_app(self.options, put_mappings=False, lock=self.manager.app_initialize_lock)
 
+        self.manager.wait_for_consumers()
         from sqlalchemy.orm import sessionmaker
         from pyramid_sqlalchemy import BaseObject
         from nefertari import engine
@@ -228,8 +228,7 @@ class ProcessManager:
         self.consumers_count = processes_count
         self.tasks = ClosedQueueAdapter(manager.Queue())
         self.results = manager.list()
-        self.app_initialize_lock = manager.Semaphore(1)
-        self.consumer_lock = manager.Barrier(processes_count)
+        self.consumer_lock = manager.Barrier(processes_count + 1)
         self.barrier = manager.Barrier(processes_count + 1)
 
     def close_task_queue(self, *args, **kwrags):
@@ -250,16 +249,18 @@ class TaskConsumer(Process):
     def __init__(self, *args, **kwargs):
         self.options = kwargs.pop('options')
         self.manager = kwargs.pop('manager')
+        self.settings = kwargs.pop('settings')
         super().__init__(*args, **kwargs)
 
     def run(self):
         from pyramid_sqlalchemy import BaseObject
         from sqlalchemy.orm import sessionmaker
         from nefertari_sqla.documents import SessionHolder
+        from nefertari.elasticsearch import ES
 
         log = get_logger()
         results = []
-        setup_app(self.options, put_mappings=False, lock=self.manager.app_initialize_lock)
+        ES.setup(dictset(self.settings))
 
         self.manager.wait_for_consumers()
         self.Session = sessionmaker()

@@ -184,7 +184,7 @@ class BoostProcessor(BaseProcessor):
 
     @classmethod
     def next(cls):
-        return FinalProcessor
+        return NestedFieldProcessor
 
     def apply(self, term):
         if term.field == '_all':
@@ -286,7 +286,9 @@ class MatchProcessor(BaseProcessor):
 
     @classmethod
     def rule(cls, term):
-        return (' ' in term.value and not RangeProcessor.rule(term)) or '_all' in term.field
+        return (' ' in term.value and not RangeProcessor.rule(term)) or\
+               '_all' in term.field or\
+               term.value.lower() != term.value
 
     @classmethod
     def next(cls):
@@ -330,6 +332,23 @@ class FinalProcessor(BaseProcessor):
         return None
 
 
+class NestedFieldProcessor(BaseProcessor):
+    name = 'field_processor'
+
+    @classmethod
+    def rule(cls, term):
+        return '.' in term.field
+
+    def apply(self, term):
+        dot_index = term.field.find('.')
+        term.path = term.field[:dot_index] + '_nested'
+        term.field = term.path + term.field[dot_index:]
+
+    @classmethod
+    def next(cls):
+        return FinalProcessor
+
+
 class Term:
 
     def __init__(self, field, value):
@@ -338,7 +357,7 @@ class Term:
         self.type = None
         self.processors = []
 
-    def build(self):
+    def parse(self):
         if self.field == 'should':
             return {self.type: {self.field: self.value, 'minimum_should_match': 1}}
         return {self.type: {self.field: self.value}}
@@ -405,7 +424,7 @@ class TermBuilder:
     def __init__(self, params=()):
         self.params = params
 
-    def __call__(self, item):
+    def __call__(self, item, lazy=False):
         field, value = smart_split(item)
         term = Term(field, value)
         processors = [
@@ -416,6 +435,7 @@ class TermBuilder:
             WildCardProcessor(),
             MatchProcessor(),
             FinalProcessor(),
+            NestedFieldProcessor(),
             BoostProcessor(BoostParams(self.params)),
         ]
 
@@ -423,8 +443,9 @@ class TermBuilder:
             if processor.rule(term):
                 term.processors.append(processor)
         term.apply_processors()
-
-        return term.build()
+        if lazy:
+            return term
+        return term.parse()
 
 
 def apply_analyzer(params, doc_type, get_document_cls):
@@ -451,7 +472,7 @@ def compile_es_query(params):
     boosted_params = params.pop('_boost', ())
 
     if boosted_params:
-        boosted_params = list(map(_parse_nested_items, boosted_params.split(',')))
+        boosted_params = boosted_params.split(',')
     term_builder = TermBuilder(boosted_params)
 
     # compile params as "AND conditions" on the top level of query_string
@@ -473,7 +494,6 @@ def compile_es_query(params):
                 query_string += '({items})'.format(items=values)
             else:
                 query_string += ':'.join([key, value])
-    query_string = _parse_nested_items(query_string)
     query_tokens = Tokenizer.tokenize(query_string)
 
     if len(query_tokens) > 1:
@@ -557,35 +577,10 @@ def _attach_item(item, aggregation, operation, term_builder):
         aggregation[operation].append(term_builder(item))
 
 
-# attach _nested to nested_document
-def _parse_nested_items(query_string):
-    """
-    attach _nested to nested_document
-    :param query_string: string
-    :return: string with updated name for nested document, like assignments_nested for assignments
-    """
-    parsed_query_string = ''
-    in_quotes = False
-    for index, key in enumerate(query_string):
-
-        if key == '"' and not in_quotes:
-            in_quotes = True
-            key = ''
-        elif key == '"' and in_quotes:
-            in_quotes = False
-            key = ''
-
-        if key == '.' and not in_quotes:
-            key = '_nested.'
-
-        parsed_query_string = parsed_query_string + key
-    return parsed_query_string
-
-
 def _is_nested(item):
     if isinstance(item, str):
         field, _ = smart_split(item)
-        return '_nested' in field
+        return '.' in field
     return False
 
 
@@ -609,8 +604,10 @@ def _attach_nested(value, aggregation, operation, term_builder):
     :param operation: ES operation keywords {must, must_not, should, should_not}
     :return: None
     """
-    field, _ = smart_split(value)
-    path = field.split('.')[0]
+    term = term_builder(value, lazy=True)
+    path = term.path
+    term = term.parse()
+
     existed_items = aggregation[operation]
     invert_operation = {'must': 'must', 'must_not': 'must', 'should': 'should'}
 
@@ -619,7 +616,7 @@ def _attach_nested(value, aggregation, operation, term_builder):
             item_path = item['nested'].get('path', False)
             if item_path == path:
                 item['nested']['query']['bool'][invert_operation[operation]]\
-                    .append(term_builder(value))
+                    .append(term)
 
                 if operation == 'should':
                     item['nested']['query']['bool']['minimum_should_match'] = 1
@@ -628,4 +625,4 @@ def _attach_nested(value, aggregation, operation, term_builder):
     else:
         existed_items.append({'nested': {
             'path': path, 'query': {'bool': {invert_operation[operation]:
-                                                 [term_builder(value)]}}}})
+                                                 [term]}}}})
