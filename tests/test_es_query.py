@@ -159,24 +159,21 @@ class TestESQueryCompilation(object):
             'must': [{'nested': {'path': 'assignments_nested', 'query': {'bool': {
                 'must': [{'term': {'assignments_nested.assignee_id': 'someuse'}}]}}}}]}}
 
-    def test_nested_query_with_quotes(self):
-        query_string = 'assignments.assignee_id:"someuse.user.@b.a.b.la."'
+    def test_simple_query_with_dots(self):
+        query_string = 'name:file.doc'
+        params = {'es_q': query_string}
+        result = compile_es_query(params)
+        assert result == {'bool': {
+            'must': [{'term': {'name': 'file.doc'}}]}}
+
+    def test_nested_query_with_dots(self):
+        query_string = 'assignments.assignee_id:someuse.user.@b.a.b.la.'
         params = {'es_q': query_string}
         result = compile_es_query(params)
         assert result == {'bool': {
             'must': [{'nested': {'query': {'bool': {
                 'must': [{'term': {'assignments_nested.assignee_id': 'someuse.user.@b.a.b.la.'}}]}},
                 'path': 'assignments_nested'}}]}}
-
-    def test_nested_query_and_with_quotes(self):
-        query_string = 'assignments.assignee_id:"someuser.some.last.name" ' \
-                 'AND assignments.assignor_id:"changed.user.name"'
-        params = {'es_q': query_string}
-        result = compile_es_query(params)
-        assert result == {'bool': {'must': [{'bool': {'must': [{'nested': {'path': 'assignments_nested', 'query': {
-            'bool': {
-                'must': [{'term': {'assignments_nested.assignee_id': 'someuser.some.last.name'}},
-                         {'term': {'assignments_nested.assignor_id': 'changed.user.name'}}]}}}}]}}]}}
 
     def test_nested_query_and(self):
         query_string = 'assignments.assignee_id:someuse AND assignments.is_completed:true'
@@ -351,7 +348,7 @@ class TestESQueryCompilation(object):
                         'path': 'assignments_nested'}}], 'minimum_should_match': 1}}]}}]}}
 
     def test_simple_query_with_parentheses(self):
-        query_string = '(assignments.assignee_id:"qweqweqwe")'
+        query_string = '(assignments.assignee_id:qweqweqwe)'
         params = {'es_q': query_string}
         result = compile_es_query(params)
         assert result == {'bool': {
@@ -393,7 +390,7 @@ class TestESQueryCompilation(object):
         assert result == {'bool': {'must': [{'term': {'assignee_id': 'some_user'}}]}}
 
     def test_parse_statement_inside_param_value(self):
-        query_string = '(assignments.assignee_id:"qweqweqwe")'
+        query_string = '(assignments.assignee_id:qweqweqwe)'
         params = {'es_q': query_string, 'project_id': '(2 OR 3)'}
         result = compile_es_query(params)
         assert result == {'bool': {
@@ -467,3 +464,21 @@ class TestESQueryCompilation(object):
                                 {'value': '*john   smith and some other username   mike*', 'boost': 5}}},
                      {'term': {'assignments_nested.is_completed': {'value': 'true', 'boost': 10}}}]}},
                                                         'path': 'assignments_nested'}}]}}]}}
+
+    def test_query_with_capital_letter(self):
+        query_string = 'name:Searchtask'
+        params = {'es_q': query_string}
+        result = compile_es_query(params)
+        assert result == {'bool': {
+            'must': [{'match': {'name': 'Searchtask'}}]}}
+
+    def test_query_with_quotes_in_nested(self):
+        query_string = '(assignments.assignee_id:"qweqweqwe") AND inbox:"testfield"'
+        params = {'es_q': query_string}
+        result = compile_es_query(params)
+        print(result)
+        assert result == {'bool': {'must': [{'bool': {'must': [
+            {'nested': {'query': {'bool': {'must': [
+                {'term': {'assignments_nested.assignee_id': 'qweqweqwe'}}]}}, 'path': 'assignments_nested'}},
+            {'term': {'inbox': 'testfield'}}]}}]}}
+
