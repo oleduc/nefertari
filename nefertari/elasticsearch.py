@@ -1,10 +1,12 @@
 from __future__ import absolute_import
 import json
+import threading
+from collections import OrderedDict
 import logging
 from functools import partial
 from collections import defaultdict
 import os
-import time
+from datetime import datetime
 
 
 import elasticsearch
@@ -62,7 +64,6 @@ class ESHttpConnection(elasticsearch.Urllib3HttpConnection):
                 status_code = 400
             if status_code == 'TIMEOUT':
                 status_code = 408
-
             raise exception_response(
                 status_code,
                 explanation=six.b(e.error),
@@ -110,7 +111,7 @@ def create_index_with_settings(settings):
 
 
 def _bulk_body(documents_actions):
-    ESAction(actions=documents_actions)
+    ES.registry.add(ESAction(actions=documents_actions))
 
 
 def process_fields_param(fields):
@@ -236,16 +237,7 @@ class DocumentProxy(object):
         raise UnknownDocumentProxiesTypeError('You have no proxy for this %s document type' % doc_type)
 
 
-class BoundAction(type):
-
-    def __call__(cls, *args, **kwargs):
-        es_action_registry = ESActionRegistry()
-        es_action = super(BoundAction, cls).__call__(*args, **kwargs)
-        es_action_registry.add(es_action)
-        return es_action
-
-
-class ESActionRegistry(ThreadLocalSingleton):
+class ESActionRegistry(threading.local):
 
     def __init__(self):
         self.registry = []
@@ -257,7 +249,7 @@ class ESActionRegistry(ThreadLocalSingleton):
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.clean()
 
-    def index(self):
+    def bulk_index(self):
         if len(self.registry):
             try:
 
@@ -304,40 +296,36 @@ class ESActionRegistry(ThreadLocalSingleton):
 
     @staticmethod
     def split_actions_by_op_type(actions):
-        op_types = {}
+        op_types = defaultdict(list)
         for action in actions:
             for action_op_type in action.op_types:
-                if action_op_type in op_types:
-                    op_types[action_op_type].extend(action.op_types[action_op_type])
-                else:
-                    op_types[action_op_type] = action.op_types[action_op_type]
+                op_types[action_op_type].extend(action.op_types[action_op_type])
         return op_types
 
     @staticmethod
     def force_indexation(actions, request=None):
-        op_types = set()
-
-        for action in actions:
-            for op_type in action.op_types:
-                op_types.add(op_type)
 
         es_data = []
+        splitted_actions = ESActionRegistry.split_actions_by_op_type(actions)
 
-        for op_type in op_types:
-            splitted_actions = ESActionRegistry.split_actions_by_op_type(actions)[op_type]
+        for op_type in splitted_actions.keys():
+            op_type_actions = splitted_actions[op_type]
             types = set()
 
-            for item in splitted_actions:
+            for item in op_type_actions:
                 types.add(item.entity_type)
-            print(types)
             for type_ in types:
                 results = [item for item in ESActionRegistry.get_latest_change(filter(lambda i: i.entity_type == type_,
-                                                                                       splitted_actions))]
+                                                                                      op_type_actions))]
                 es_data.extend(results)
 
         es_data = ESActionRegistry.prepare_for_deletion(es_data)
         flat_actions = [data.action for data in es_data]
-        refresh_enabled = ES.settings.asbool('enable_refresh_query')
+
+        if ES.settings.get('enable_refresh_query'):
+            refresh_enabled = ES.settings.asbool('enable_refresh_query')
+        else:
+            refresh_enabled = False
 
         kwargs = {
             'client': ES.api,
@@ -353,10 +341,8 @@ class ESActionRegistry(ThreadLocalSingleton):
 
         if refresh_enabled:
             kwargs['refresh'] = refresh_index
-
         helpers.bulk(**kwargs)
-       # log.debug(str(kwargs['actions']))
-        print('Successfully executed {} elasticsearch actions'.format(list(map(lambda x: (x['_op_type'], x['_type'], x['_id']),kwargs['actions']))))
+
         log.debug('Successfully executed {} elasticsearch actions'.format(list(map(lambda x: (x['_op_type'], x['_type'], x['_id']),kwargs['actions']))))
 
     @staticmethod
@@ -375,6 +361,7 @@ class ESActionRegistry(ThreadLocalSingleton):
     def prepare_for_deletion(es_data):
         to_delete = list(filter(lambda i: i.op_type == 'delete', es_data))
         results = []
+
         if not to_delete:
             return es_data
 
@@ -404,11 +391,11 @@ class ESData:
         return str(self.op_type) + ' ' + str(self.id) + ' ' + self.entity_type + ' ' + str(self.created_at)
 
 
-class ESAction(metaclass=BoundAction):
+class ESAction:
 
     def __init__(self, **params):
         self.op_types = defaultdict(list)
-        self.creation_time = time.time()
+        self.creation_time = datetime.now()
 
         for action in params['actions']:
             self.op_types[action['_op_type']].append(ESData(action=action, created_at=self.creation_time))
@@ -421,6 +408,7 @@ class ES(object):
     api = None
     settings = None
     document_proxy = DocumentProxy
+    registry = ESActionRegistry()
 
     @classmethod
     def src2type(cls, source):
@@ -441,7 +429,7 @@ class ES(object):
 
             params = {}
             if cls.settings.asbool('sniff'):
-                params = params.update(dict(
+                params.update(dict(
                     sniff_on_start=True,
                     sniff_on_connection_fail=True
                 ))
@@ -644,11 +632,11 @@ class ES(object):
         else:
             log.warning('Empty body')
 
-    def index(self, documents, request=None, **kwargs):
+    def index(self, documents, **kwargs):
         if isinstance(documents, list):
-            self.index_documents(documents, request=request)
+            self.index_documents(documents)
         elif isinstance(documents, set):
-            self.index_documents(list(documents), request=request)
+            self.index_documents(list(documents))
         elif engine.is_object_document(documents):
             self._bulk('index', documents.to_indexable_dict())
         else:
@@ -665,7 +653,7 @@ class ES(object):
                 'Document type must be an instance of a type extending `BaseDocument` not a `{}`'.format(
                     type(document).__name__))
 
-    def index_documents(self, documents, request=None):
+    def index_documents(self, documents):
         dict_documents = []
 
         for document in documents:
@@ -739,11 +727,11 @@ class ES(object):
 
         self._bulk('index', documents)
 
-    def delete(self, ids, request=None):
+    def delete(self, ids):
         if not isinstance(ids, list):
             ids = [ids]
 
-        documents = [{'_pk': _id, '_type': self.doc_type} for _id in ids]
+        #documents = [{'_pk': _id, '_type': self.doc_type} for _id in ids]
 
         actions = []
 
@@ -755,7 +743,7 @@ class ES(object):
                 '_id': _id
             }
             actions.append(action)
-        ESAction(actions=actions)
+        self.registry.add(ESAction(actions=actions))
 
         #self._bulk('delete', documents)
 
@@ -1094,7 +1082,7 @@ class ES(object):
                     if getattr(child, pk_name) is not None:
                         children_to_index.append(child)
 
-                cls(model_cls.__name__).index_documents(children_to_index, request=request)
+                cls(model_cls.__name__).index_documents(children_to_index)
 
     @classmethod
     def bulk_index_relations(cls, items, request=None, **kwargs):
@@ -1115,4 +1103,4 @@ class ES(object):
                     index_map[model_cls.__name__].update(related_items)
 
         for model_name, instances in index_map.items():
-            cls(model_name).index_documents(instances, request=request)
+            cls(model_name).index_documents(instances)

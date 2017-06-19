@@ -13,7 +13,7 @@ from sqlalchemy import text
 from six.moves import urllib
 
 from nefertari.utils import dictset, split_strip, to_dicts, to_indexable_dicts
-from nefertari.elasticsearch import ES, ESActionRegistry, create_index_with_settings
+from nefertari.elasticsearch import ES, create_index_with_settings
 from nefertari import engine
 
 
@@ -301,8 +301,9 @@ class TaskConsumer(Process):
         documents = to_indexable_dicts(query_set)
 
         es.index_missing_documents(documents)
-        with ESActionRegistry() as es_registry:
-            es_registry.index()
+
+        with ES.registry as es_registry:
+            es_registry.bulk_index()
 
         return ids
 

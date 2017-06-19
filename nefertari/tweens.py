@@ -5,7 +5,6 @@ import json
 import six
 from pyramid.settings import asbool
 from nefertari.utils import drop_reserved_params
-from nefertari.elasticsearch import ESActionRegistry
 
 log = logging.getLogger(__name__)
 
@@ -152,14 +151,17 @@ def enable_selfalias(config, id_name):
     config.add_subscriber(context_found_subscriber, ContextFound)
 
 
-def es_tween_factory(handler, registry):
+def es_tween(handler, registry):
+    log.info('ES tween enabled')
+    from nefertari.elasticsearch import ES
+
     def es_tween(request):
-        with ESActionRegistry() as es_registry:
-            es_registry.bind(request)
+        with ES.registry:
+            ES.registry.bind(request)
             response = handler(request)
 
             if response.status_code < 300:
-                es_registry.index()
+                ES.registry.bulk_index()
 
         return response
     return es_tween

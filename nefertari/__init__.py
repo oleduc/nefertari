@@ -49,7 +49,11 @@ def includeme(config):
     config.add_request_method(get_resource_map, 'resource_map', reify=True)
 
     config.add_tween('nefertari.tweens.cache_control')
-    config.add_tween('nefertari.tweens.es_tween_factory', over='pyramid_tm.tm_tween_factory')
+    try:
+        import pyramid_tm
+        config.add_tween('nefertari.tweens.es_tween', over='pyramid_tm.tm_tween_factory')
+    except ImportError:
+        pass
 
     config.add_subscriber_predicate('model', ModelClassIs)
     config.add_subscriber_predicate('field', FieldIsChanged)
