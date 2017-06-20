@@ -644,7 +644,7 @@ class ES(object):
                 'Documents type must be `list`,`set` or `BaseDocument` not a `{}`'.format(
                     type(documents).__name__))
 
-    def index_document(self, document, request=None):
+    def index_document(self, document):
         if engine.is_object_document(document):
             """ Reindex all `document`s. """
             self._bulk('index', document.to_indexable_dict())
@@ -666,7 +666,7 @@ class ES(object):
         """ Reindex all `document`s. """
         self._bulk('index', dict_documents,)
 
-    def index_nested_document(self, parent, field, target, request=None):
+    def index_nested_document(self, parent, field, target):
         actions = []
         _doc_type = self.src2type(getattr(parent, '_type', self.doc_type))
         target_field = getattr(parent, field)
@@ -692,7 +692,7 @@ class ES(object):
 
         _bulk_body(actions)
 
-    def index_missing_documents(self, documents, request=None):
+    def index_missing_documents(self, documents):
         """ Index documents that are missing from ES index.
 
         Determines which documents are missing using ES `mget` call which
@@ -1072,7 +1072,7 @@ class ES(object):
         return dict2proxy(data, self.proxy)
 
     @classmethod
-    def index_relations(cls, db_obj, request=None, **kwargs):
+    def index_relations(cls, db_obj, **kwargs):
         for model_cls, documents in db_obj.get_related_documents(**kwargs):
             if getattr(model_cls, '_index_enabled', False) and documents:
                 children_to_index = []
@@ -1085,7 +1085,7 @@ class ES(object):
                 cls(model_cls.__name__).index_documents(children_to_index)
 
     @classmethod
-    def bulk_index_relations(cls, items, request=None, **kwargs):
+    def bulk_index_relations(cls, items, **kwargs):
         """ Index objects related to :items: in bulk.
         Related items are first grouped in map
         {model_name: {item1, item2, ...}} and then indexed.
