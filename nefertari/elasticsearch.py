@@ -238,7 +238,9 @@ class DocumentProxy(object):
 
 
 class ESActionRegistry(threading.local):
-
+    """
+    Object which manage indexation. Should be used as context manager for starting indexation.
+    """
     def __init__(self):
         self.registry = []
         self.request = None
@@ -250,6 +252,12 @@ class ESActionRegistry(threading.local):
         self.clean()
 
     def bulk_index(self):
+        """
+        Entry point for indexation process. Should be called inside context manager:
+        with ES.registry as es_registry:
+            es_registry.bulk_index()
+        May produce exception so we should clean up resources after each call of this function.
+        """
         if len(self.registry):
             try:
 
@@ -269,6 +277,9 @@ class ESActionRegistry(threading.local):
         self.request = request
 
     def reindex_conflicts(self, exc):
+        """
+        Check response returned by bulk request to elasticsearch and if it contains conflicts try to reload document from SQL storage and reindex it
+        """
         conflicts = []
         for error in exc.errors:
             for action, response in error.items():
@@ -304,7 +315,6 @@ class ESActionRegistry(threading.local):
 
     @staticmethod
     def force_indexation(actions, request=None):
-
         es_data = []
         splitted_actions = ESActionRegistry.split_actions_by_op_type(actions)
 
@@ -337,23 +347,30 @@ class ESActionRegistry(threading.local):
             kwargs['refresh'] = refresh_index
 
         helpers.bulk(**kwargs)
-
         log.debug('Successfully executed {} elasticsearch actions'.format(list(map(lambda x: (x['_op_type'], x['_type'], x['_id']),kwargs['actions']))))
 
     @staticmethod
-    def get_latest_change(data):
-        ids = {}
-        for item in data:
-            if item.id in ids:
-                ids[item.id].append(item)
-            else:
-                ids[item.id] = [item]
+    def get_latest_change(es_data):
+        """
+        :param es_data: List of ESData instances of one type of instance (example _type:Task).
+        This list can contains few ESData objects related to the same entity.
+        We should get only last created ESData object.
+        :return: ESData, latest changes related to entity.
+        """
+        ids = defaultdict(list)
+        for item in es_data:
+            ids[item.id].append(item)
 
         for i in ids:
             yield max(ids[i], key=lambda x: x.creation_time)
 
     @staticmethod
     def prepare_for_deletion(es_data):
+        """
+        :param es_data: List of ESData instances with different operations
+        This function detects items which should be deleted and remove all index actions related to this instance.
+        :return: filtered list of ESData instances
+        """
         to_delete = list(filter(lambda i: i.op_type == 'delete', es_data))
         results = []
 
@@ -374,7 +391,9 @@ class ESActionRegistry(threading.local):
 
 
 class ESData:
-
+    """
+    Contains information about data which should be indexed.
+    """
     def __init__(self, action: dict, creation_time):
         self.action = action
         self.creation_time = creation_time
