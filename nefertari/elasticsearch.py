@@ -63,7 +63,7 @@ class ESHttpConnection(elasticsearch.Urllib3HttpConnection):
             if status_code == 'N/A':
                 status_code = 400
             if status_code == 'TIMEOUT':
-                status_code = 408
+                status_code = 504
             raise exception_response(
                 status_code,
                 explanation=six.b(e.error),
@@ -271,16 +271,16 @@ class ESActionRegistry(threading.local):
     def reindex_conflicts(self, exc):
         conflicts = []
         for error in exc.errors:
-            for action in error.keys():
-                if error[action]['status'] == 409:
-                    log.error("CONFLICT DETECTED !!!")
-                    document = engine.reload_document(_type=error[action]['_type'],_id=error[action]['_id'])
+            for action, response in error.items():
+                if response['status'] == 409:
+                    log.error('CONFLICT DETECTED {response}'.format(response=response))
+                    document = engine.reload_document(_type=response['_type'],_id=response['_id'])
                     if document:
                         conflicts.append({
-                            '_type': error[action]['_type'],
-                            '_id': error[action]['_id'],
+                            '_type': response['_type'],
+                            '_id': response['_id'],
                             '_op_type': action,
-                            '_index': error[action]['_index'],
+                            '_index': response['_index'],
                             '_source': document
                         })
 
@@ -322,25 +322,20 @@ class ESActionRegistry(threading.local):
         es_data = ESActionRegistry.prepare_for_deletion(es_data)
         flat_actions = [data.action for data in es_data]
 
-        if ES.settings.get('enable_refresh_query'):
-            refresh_enabled = ES.settings.asbool('enable_refresh_query')
-        else:
-            refresh_enabled = False
-
         kwargs = {
             'client': ES.api,
             'actions': flat_actions,
-
         }
 
-        if request:
-            query_params = request.params.mixed()
-            refresh_index = query_params.get('_refresh_index', True)
-        else:
-            refresh_index = True
+        if ES.settings.get('enable_refresh_query') and ES.settings.asbool('enable_refresh_query'):
+            if request:
+                query_params = request.params.mixed()
+                refresh_index = query_params.get('_refresh_index', True)
+            else:
+                refresh_index = True
 
-        if refresh_enabled:
             kwargs['refresh'] = refresh_index
+
         helpers.bulk(**kwargs)
 
         log.debug('Successfully executed {} elasticsearch actions'.format(list(map(lambda x: (x['_op_type'], x['_type'], x['_id']),kwargs['actions']))))
@@ -355,7 +350,7 @@ class ESActionRegistry(threading.local):
                 ids[item.id] = [item]
 
         for i in ids:
-            yield sorted(ids[i], key=lambda x: x.created_at).pop()
+            yield max(ids[i], key=lambda x: x.creation_time)
 
     @staticmethod
     def prepare_for_deletion(es_data):
@@ -380,15 +375,15 @@ class ESActionRegistry(threading.local):
 
 class ESData:
 
-    def __init__(self, action: dict, created_at):
+    def __init__(self, action: dict, creation_time):
         self.action = action
-        self.created_at = created_at
+        self.creation_time = creation_time
         self.entity_type = action['_type']
         self.id = str(action['_id'])
         self.op_type = action['_op_type']
 
     def __repr__(self):
-        return str(self.op_type) + ' ' + str(self.id) + ' ' + self.entity_type + ' ' + str(self.created_at)
+        return str(self.op_type) + ' ' + str(self.id) + ' ' + self.entity_type + ' ' + str(self.creation_time)
 
 
 class ESAction:
@@ -398,7 +393,7 @@ class ESAction:
         self.creation_time = datetime.now()
 
         for action in params['actions']:
-            self.op_types[action['_op_type']].append(ESData(action=action, created_at=self.creation_time))
+            self.op_types[action['_op_type']].append(ESData(action=action, creation_time=self.creation_time))
 
     def __repr__(self):
         return str(self.op_types)
@@ -731,8 +726,6 @@ class ES(object):
         if not isinstance(ids, list):
             ids = [ids]
 
-        #documents = [{'_pk': _id, '_type': self.doc_type} for _id in ids]
-
         actions = []
 
         for _id in ids:
@@ -744,8 +737,6 @@ class ES(object):
             }
             actions.append(action)
         self.registry.add(ESAction(actions=actions))
-
-        #self._bulk('delete', documents)
 
     def get_by_ids(self, ids, **params):
         if not ids:

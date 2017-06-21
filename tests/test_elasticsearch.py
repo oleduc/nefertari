@@ -6,7 +6,7 @@ import pytest
 from mock import Mock, patch, call
 from elasticsearch.exceptions import TransportError
 from nefertari import elasticsearch as es
-from nefertari.json_httpexceptions import JHTTPBadRequest, JHTTPNotFound, JHTTPUnprocessableEntity, JHTTPRequestTimeout
+from nefertari.json_httpexceptions import JHTTPBadRequest, JHTTPNotFound, JHTTPUnprocessableEntity, JHTTPGatewayTimeout
 from nefertari.utils import dictset
 from nefertari.elasticsearch import ES, ESData
 
@@ -23,8 +23,8 @@ class TestESActionRegistry(object):
     def test_get_latest_change(self):
         now = datetime.now()
         in_two_hours = now + timedelta(hours=2)
-        first_data = ESData(action={'_op_type': 'index', '_type': 'Item','_id': 2}, created_at=now)
-        second_data = ESData(action={'_op_type': 'index', '_type': 'Item','_id': 2}, created_at=in_two_hours)
+        first_data = ESData(action={'_op_type': 'index', '_type': 'Item','_id': 2}, creation_time=now)
+        second_data = ESData(action={'_op_type': 'index', '_type': 'Item','_id': 2}, creation_time=in_two_hours)
         gen = ES.registry.get_latest_change([first_data, second_data])
         result = next(gen)
 
@@ -36,8 +36,8 @@ class TestESActionRegistry(object):
     def test_filter_deleted_items_from_index(self):
         now = datetime.now()
         in_two_hours = now + timedelta(hours=2)
-        first_data = ESData(action={'_op_type': 'index', '_type': 'Item','_id': 2}, created_at=now)
-        second_data = ESData(action={'_op_type': 'delete', '_type': 'Item','_id': 2}, created_at=in_two_hours)
+        first_data = ESData(action={'_op_type': 'index', '_type': 'Item','_id': 2}, creation_time=now)
+        second_data = ESData(action={'_op_type': 'delete', '_type': 'Item','_id': 2}, creation_time=in_two_hours)
         result = ES.registry.prepare_for_deletion([first_data, second_data])
 
         assert len(result) == 1
@@ -46,8 +46,8 @@ class TestESActionRegistry(object):
     def test_filter_deleted_items_from_index_without_deleted(self):
         now = datetime.now()
         in_two_hours = now + timedelta(hours=2)
-        first_data = ESData(action={'_op_type': 'index', '_type': 'Item','_id': 2}, created_at=now)
-        second_data = ESData(action={'_op_type': 'index', '_type': 'Item','_id': 2}, created_at=in_two_hours)
+        first_data = ESData(action={'_op_type': 'index', '_type': 'Item','_id': 2}, creation_time=now)
+        second_data = ESData(action={'_op_type': 'index', '_type': 'Item','_id': 2}, creation_time=in_two_hours)
         result = ES.registry.prepare_for_deletion([first_data, second_data])
 
         assert len(result) == 2
@@ -60,8 +60,8 @@ class TestESActionRegistry(object):
     def test_filter_deleted_items_from_index_without_index(self):
         now = datetime.now()
         in_two_hours = now + timedelta(hours=2)
-        first_data = ESData(action={'_op_type': 'deleted', '_type': 'Item','_id': 1}, created_at=now)
-        second_data = ESData(action={'_op_type': 'deleted', '_type': 'Item','_id': 2}, created_at=in_two_hours)
+        first_data = ESData(action={'_op_type': 'deleted', '_type': 'Item','_id': 1}, creation_time=now)
+        second_data = ESData(action={'_op_type': 'deleted', '_type': 'Item','_id': 2}, creation_time=in_two_hours)
         result = ES.registry.prepare_for_deletion([first_data, second_data])
 
         assert len(result) == 2
@@ -164,7 +164,7 @@ class TestESHttpConnection(object):
         conn = es.ESHttpConnection()
         conn.pool = Mock()
         conn.pool.urlopen.side_effect = ReadTimeoutError(Mock(), Mock(), Mock())
-        with pytest.raises(JHTTPRequestTimeout):
+        with pytest.raises(JHTTPGatewayTimeout):
             conn.perform_request('POST', 'http://localhost:9200')
 
     @patch('nefertari.elasticsearch.log')
