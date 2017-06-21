@@ -154,7 +154,7 @@ def enable_selfalias(config, id_name):
 def es_tween(handler, registry):
     """
     ES_tween called after pyramid_tm, so we can check if SQL transaction commited sucessfuly or with errors.
-    If response returned by handler:function will have status > 400 that means something went wrong and we should index any changes.
+    If response returned by handler:function will have status > 400 that means something went wrong and we should not index any changes.
     """
     log.info('ES tween enabled')
     from nefertari.elasticsearch import ES
