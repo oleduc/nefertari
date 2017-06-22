@@ -70,6 +70,7 @@ class ESHttpConnection(elasticsearch.Urllib3HttpConnection):
                 explanation=six.b(e.error),
                 extra=dict(data=e))
         else:
+            log.error('Unexpected ES ERROR ->{}'.format(e))
             self._catch_index_error(resp)
             return resp
 
