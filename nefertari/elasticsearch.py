@@ -45,6 +45,7 @@ class ESHttpConnection(elasticsearch.Urllib3HttpConnection):
             message = error_dict['error']
         except (KeyError, IndexError):
             return
+        log.error('Unexpected ES ERROR ->{}'.format(raw_data))
         raise exception_response(400, detail=message)
 
     def perform_request(self, *args, **kw):
@@ -70,7 +71,6 @@ class ESHttpConnection(elasticsearch.Urllib3HttpConnection):
                 explanation=six.b(e.error),
                 extra=dict(data=e))
         else:
-            log.error('Unexpected ES ERROR ->{}'.format(resp))
             self._catch_index_error(resp)
             return resp
 
