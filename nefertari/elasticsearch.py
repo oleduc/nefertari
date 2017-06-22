@@ -56,6 +56,7 @@ class ESHttpConnection(elasticsearch.Urllib3HttpConnection):
                 log.debug(msg)
             resp = super(ESHttpConnection, self).perform_request(*args, **kw)
         except TransportError as e:
+            log.error('Elasticsearch ERROR ->{}'.format(e))
             status_code = e.status_code
             if status_code == 404 and 'IndexMissingException' in e.error:
                 log.error(str(e))
