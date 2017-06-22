@@ -25,7 +25,7 @@ from nefertari.es_query import compile_es_query, apply_analyzer
 log = logging.getLogger(__name__)
 
 
-class IndexNotFoundException(Exception):
+class IndexNotFoundException(ElasticsearchException):
     pass
 
 
