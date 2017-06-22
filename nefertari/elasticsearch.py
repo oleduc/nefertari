@@ -16,7 +16,7 @@ import six
 
 
 from nefertari.utils import (
-    dictset, dict2proxy, process_limit, split_strip, DataProxy, ThreadLocalSingleton)
+    dictset, dict2proxy, process_limit, split_strip, DataProxy)
 from nefertari.json_httpexceptions import (JHTTPBadRequest, JHTTPNotFound,
                                            exception_response, JHTTPUnprocessableEntity)
 from nefertari import engine, RESERVED_PARAMS
@@ -30,23 +30,23 @@ class IndexNotFoundException(Exception):
 
 
 class ESHttpConnection(elasticsearch.Urllib3HttpConnection):
-    def _catch_index_error(self, response):
-        """ Catch and raise index errors which are not critical and thus
-        not raised by elasticsearch-py.
-        """
-        code, headers, raw_data = response
-        if not raw_data:
-            return
-        data = json.loads(raw_data)
-        if not data or not data.get('errors'):
-            return
-        try:
-            error_dict = data['items'][0]['index']
-            message = error_dict['error']
-        except (KeyError, IndexError):
-            return
-        log.error('Unexpected ES ERROR ->{}'.format(raw_data))
-        raise exception_response(400, detail=message)
+    # def _catch_index_error(self, response):
+    #     """ Catch and raise index errors which are not critical and thus
+    #     not raised by elasticsearch-py.
+    #     """
+    #     code, headers, raw_data = response
+    #     if not raw_data:
+    #         return
+    #     data = json.loads(raw_data)
+    #     if not data or not data.get('errors'):
+    #         return
+    #     try:
+    #         error_dict = data['items'][0]['index']
+    #         message = error_dict['error']
+    #     except (KeyError, IndexError):
+    #         return
+    #     log.error('Unexpected ES ERROR ->{}'.format(raw_data))
+    #     raise exception_response(400, detail=message)
 
     def perform_request(self, *args, **kw):
         try:
@@ -66,12 +66,15 @@ class ESHttpConnection(elasticsearch.Urllib3HttpConnection):
                 status_code = 400
             if status_code == 'TIMEOUT':
                 status_code = 504
+            if status_code == 409:
+                raise
+
             raise exception_response(
                 status_code,
                 explanation=six.b(e.error),
                 extra=dict(data=e))
         else:
-            self._catch_index_error(resp)
+ #        self._catch_index_error(resp)
             return resp
 
 
