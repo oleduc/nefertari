@@ -5,6 +5,9 @@ import json
 import six
 from pyramid.settings import asbool
 from nefertari.utils import drop_reserved_params
+from nefertari.json_httpexceptions import httperrors
+from pyramid import httpexceptions as http_exc
+
 
 log = logging.getLogger(__name__)
 
@@ -160,12 +163,16 @@ def es_tween(handler, registry):
     from nefertari.elasticsearch import ES
 
     def es_tween(request):
-        with ES.registry:
+        try:
             ES.registry.bind(request)
             response = handler(request)
 
             if response.status_code < 300:
                 ES.registry.bulk_index()
 
+        except http_exc.HTTPException as exc:
+            response = httperrors(context=exc, request=request)
+        finally:
+            ES.registry.clean()
         return response
     return es_tween
