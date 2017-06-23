@@ -46,7 +46,7 @@ class ESHttpConnection(elasticsearch.Urllib3HttpConnection):
         except (KeyError, IndexError):
             return
         log.error('Unexpected ES ERROR ->{}'.format(raw_data))
-        raise exception_response(400, detail=message)
+        raise exception_response(503, detail=message)
 
     def perform_request(self, *args, **kw):
         try:
@@ -302,7 +302,6 @@ class ESActionRegistry(threading.local):
                         })
 
         if conflicts:
-            print(conflicts)
             self.force_indexation(actions=[ESAction(actions=conflicts)], request=self.request)
 
     def clean(self):
@@ -382,8 +381,9 @@ class ESActionRegistry(threading.local):
             instance = request.context
         else:
             response = request.response.json_body
-            item_type, item_id = response['_type'], response['id']
+            item_type = response['_type']
             item_cls = engine.get_document_cls(item_type)
+            item_id = response[item_cls.pk_field()]
             instance = item_cls.get_item(**{item_cls.pk_field(): item_id})
         to_refresh = []
 
