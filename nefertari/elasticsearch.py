@@ -292,15 +292,17 @@ class ESActionRegistry(threading.local):
                     log.error('CONFLICT DETECTED {response}'.format(response=response))
                     document = engine.reload_document(_type=response['_type'],_id=response['_id'])
                     if document:
+                        _type = document.pop('_type')
                         conflicts.append({
-                            '_type': response['_type'],
-                            '_id': response['_id'],
-                            '_op_type': action,
+                            '_type': _type,
+                            '_id': document['_pk'],
+                            '_op_type': 'index',
                             '_index': response['_index'],
                             '_source': document
                         })
 
         if conflicts:
+            print(conflicts)
             self.force_indexation(actions=[ESAction(actions=conflicts)], request=self.request)
 
     def clean(self):
@@ -320,6 +322,7 @@ class ESActionRegistry(threading.local):
 
     @staticmethod
     def force_indexation(actions, request=None):
+        refresh_index = ES.settings.get('enable_refresh_query', False) and ES.settings.asbool('enable_refresh_query')
         es_data = []
         splitted_actions = ESActionRegistry.split_actions_by_op_type(actions)
 
@@ -337,19 +340,22 @@ class ESActionRegistry(threading.local):
         es_data = ESActionRegistry.prepare_for_deletion(es_data)
         flat_actions = [data.action for data in es_data]
 
+        if request:
+            query_params = request.params.mixed()
+            refresh_index = query_params.get('_refresh_index', refresh_index)
+            refresh_parent = query_params.get('_refresh_parent', False)
+        else:
+            refresh_index = True
+            refresh_parent = False
+
+        if refresh_parent:
+            ESActionRegistry.refresh_parent_document(flat_actions, request)
+
         kwargs = {
             'client': ES.api,
             'actions': flat_actions,
+            'refresh': refresh_index
         }
-
-        if ES.settings.get('enable_refresh_query') and ES.settings.asbool('enable_refresh_query'):
-            if request:
-                query_params = request.params.mixed()
-                refresh_index = query_params.get('_refresh_index', True)
-            else:
-                refresh_index = True
-
-            kwargs['refresh'] = refresh_index
 
         helpers.bulk(**kwargs)
         log.debug('Successfully executed {} elasticsearch actions'.format(list(map(lambda x: (x['_op_type'], x['_type'], x['_id']),kwargs['actions']))))
@@ -368,6 +374,31 @@ class ESActionRegistry(threading.local):
 
         for i in ids:
             yield max(ids[i], key=lambda x: x.creation_time)
+
+    @staticmethod
+    def refresh_parent_document(flat_actions, request):
+        if engine.is_object_document(request.context):
+            request.context.refresh()
+            instance = request.context
+        else:
+            response = request.response.json_body
+            item_type, item_id = response['_type'], response['id']
+            item_cls = engine.get_document_cls(item_type)
+            instance = item_cls.get_item(**{item_cls.pk_field(): item_id})
+        to_refresh = []
+
+        for document, _ in instance.get_parent_documents(nested_only=True):
+            indexable_document = document.to_indexable_dict()
+            to_refresh.append(indexable_document)
+
+        for action in flat_actions:
+            if '_source' not in action:
+                continue
+            for refreshed_document in reversed(to_refresh):
+                if refreshed_document['_type'] == action['_type'] and refreshed_document['_pk'] == action['_id'] and action['_op_type'] == 'index':
+                    to_refresh.remove(refreshed_document)
+                    del refreshed_document['_type']
+                    action['_source'] = refreshed_document
 
     @staticmethod
     def prepare_for_deletion(es_data):
