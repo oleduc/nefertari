@@ -46,7 +46,7 @@ class ESHttpConnection(elasticsearch.Urllib3HttpConnection):
         except (KeyError, IndexError):
             return
         log.error('Unexpected ES ERROR ->{}'.format(raw_data))
-        raise exception_response(503, detail=message)
+        raise exception_response(503, explanation=message)
 
     def perform_request(self, *args, **kw):
         try:
