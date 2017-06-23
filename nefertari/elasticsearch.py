@@ -385,6 +385,7 @@ class ESActionRegistry(threading.local):
             item_cls = engine.get_document_cls(item_type)
             item_id = response[item_cls.pk_field()]
             instance = item_cls.get_item(**{item_cls.pk_field(): item_id})
+
         to_refresh = []
 
         for document, _ in instance.get_parent_documents(nested_only=True):
@@ -399,6 +400,19 @@ class ESActionRegistry(threading.local):
                     to_refresh.remove(refreshed_document)
                     del refreshed_document['_type']
                     action['_source'] = refreshed_document
+
+        if to_refresh:
+            index_name = flat_actions[0]['_index']
+            for refreshed_document in to_refresh:
+                doc_type = refreshed_document.pop('_type')
+                flat_actions.append({
+                    '_op_type': 'index',
+                    '_type': doc_type,
+                    '_index': index_name,
+                    '_id': refreshed_document['_pk'],
+                    '_source': refreshed_document
+                })
+
 
     @staticmethod
     def prepare_for_deletion(es_data):
