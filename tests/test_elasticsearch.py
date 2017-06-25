@@ -83,20 +83,35 @@ class TestESActionRegistry(object):
         ES.registry.clean()
 
         mock_bulk.assert_called_once_with(actions=[
-            {'_index': 'foondex', '_source': {'_pk': 1, '_type': 'Doc', 'name': 'foo'}, '_id': 1, '_type': 'Doc', '_op_type': 'index'}
+            {'_op_type': 'index', '_type': 'Doc', '_index': 'foondex', '_id': 1, '_source': {'_pk': 1, 'name': 'foo'}}
         ], client=mock_api, refresh=True)
 
     @patch('nefertari.elasticsearch.engine')
     @patch('nefertari.elasticsearch.ES.api')
     @patch('nefertari.elasticsearch.ES.settings')
     @patch('nefertari.elasticsearch.helpers.bulk')
-    def test_reindex_conflicts(self, mock_bulk, mock_settings, mock_api, mock_engine):
+    def test_reindex_conflicts_different_status(self, mock_bulk, mock_settings, mock_api, mock_engine):
         exc = Mock()
         exc.errors = [{'index': {'status': 408, '_type': 'Doc', '_id': 1, '_index': 'foondex'}}]
         mock_engine.reload_document = lambda *args, **kwargs: {'_pk': 1, 'name': 'foo', '_type': 'Doc'}
         ES.registry.reindex_conflicts(exc)
         ES.registry.clean()
         assert  mock_bulk.called == False
+
+    @patch('nefertari.elasticsearch.engine')
+    @patch('nefertari.elasticsearch.ES.api')
+    @patch('nefertari.elasticsearch.ES.settings')
+    @patch('nefertari.elasticsearch.helpers.bulk')
+    def test_reindex_conflicts_update_action(self, mock_bulk, mock_settings, mock_api, mock_engine):
+        exc = Mock()
+        exc.errors = [{'update': {'status': 409, '_type': 'Doc', '_id': 1, '_index': 'foondex'}}]
+        mock_engine.reload_document = lambda *args, **kwargs: {'_pk': 1, 'name': 'foo', '_type': 'Doc'}
+        ES.registry.reindex_conflicts(exc)
+        ES.registry.clean()
+
+        mock_bulk.assert_called_once_with(actions=[
+            {'_op_type': 'index', '_type': 'Doc', '_index': 'foondex', '_id': 1, '_source': {'_pk': 1, 'name': 'foo'}}
+        ], client=mock_api, refresh=True)
 
 class TestESHttpConnection(object):
     @patch('nefertari.elasticsearch.ESHttpConnection._catch_index_error')
