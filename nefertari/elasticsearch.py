@@ -344,7 +344,6 @@ class ESActionRegistry(threading.local):
             refresh_index = query_params.get('_refresh_index', refresh_index)
             refresh_parent = query_params.get('_refresh_parent', False)
         else:
-            refresh_index = True
             refresh_parent = False
 
         if refresh_parent:
