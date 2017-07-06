@@ -77,6 +77,7 @@ class TestESActionRegistry(object):
     @patch('nefertari.elasticsearch.helpers.bulk')
     def test_reindex_conflicts(self, mock_bulk, mock_settings, mock_api, mock_engine):
         exc = Mock()
+        mock_settings.asbool.return_value = True
         exc.errors = [{'index': {'status': 409, '_type': 'Doc', '_id': 1, '_index': 'foondex'}}]
         mock_engine.reload_document = lambda *args, **kwargs: {'_pk': 1, 'name': 'foo', '_type': 'Doc'}
         ES.registry.reindex_conflicts(exc)
@@ -106,6 +107,7 @@ class TestESActionRegistry(object):
         exc = Mock()
         exc.errors = [{'update': {'status': 409, '_type': 'Doc', '_id': 1, '_index': 'foondex'}}]
         mock_engine.reload_document = lambda *args, **kwargs: {'_pk': 1, 'name': 'foo', '_type': 'Doc'}
+        mock_settings.asbool.return_value = True
         ES.registry.reindex_conflicts(exc)
         ES.registry.clean()
 
@@ -241,6 +243,7 @@ class TestHelperFunctions(object):
         mock_helpers.bulk.return_value = (1, [])
         request = Mock()
         request.params.mixed.return_value = {'_refresh_index': True}
+        mock_settings.asbool.return_value = True
         with ES.registry as es_registry:
             es._bulk_body([{'_op_type': 'index', '_type': 'Item','_id': 2}])
             es_registry.bulk_index()
@@ -267,6 +270,7 @@ class TestHelperFunctions(object):
         mock_helpers.bulk.return_value = (1, [])
         request = Mock()
         request.params.mixed.return_value = {'_refresh_index': False}
+        mock_settings.asbool.return_value = True
 
         with ES.registry as es_registry:
             es_registry.bind(request)
@@ -280,6 +284,7 @@ class TestHelperFunctions(object):
     def test_indexation_failed(self, mock_helpers, mock_settings):
         mock_helpers.bulk.return_value = (1, [])
         request = Mock()
+        mock_settings.asbool.return_value = True
         request.params.mixed.return_value = {'_refresh_index': True}
         es._bulk_body([{'_op_type': 'index', '_type': 'Item','_id': 2}])
 
@@ -608,6 +613,7 @@ class TestES(object):
     def test_delete(self, mock_bulk, mock_settings):
         obj = es.ES('Foo', 'foondex', chunk_size=4)
         obj.delete(ids=[1])
+        mock_settings.asbool.return_value = True
 
         with ES.registry as es_registry:
             es_registry.bulk_index()
@@ -621,6 +627,7 @@ class TestES(object):
     def test_delete_single_obj(self, mock_bulk, mock_settings):
         obj = es.ES('Foo', 'foondex', chunk_size=4)
         obj.delete(ids=1)
+        mock_settings.asbool.return_value = True
 
         with ES.registry as es_registry:
             es_registry.bulk_index()
@@ -636,6 +643,7 @@ class TestES(object):
     def test_index_missing_documents(self,mock_api, mock_mget, mock_bulk, mock_settings):
         print('here')
         obj = es.ES('Foo', 'foondex', chunk_size=10)
+        mock_settings.asbool.return_value = True
         documents = [
             {'_pk': 1, 'name': 'foo'},
             {'_pk': 2, 'name': 'bar'}
@@ -667,6 +675,7 @@ class TestES(object):
     def test_index_single_document_twice(self, mock_bulk, mock_settings, mock_api, mock_engine):
         obj = es.ES('Foo', 'foondex', chunk_size=10)
         mock_engine.is_object_document = Mock(return_value=True)
+        mock_settings.asbool.return_value = True
 
         first_document = Mock()
         first_document.to_indexable_dict = Mock(return_value={'_pk': 1, 'name': 'foo', '_type': 'Doc'})
@@ -693,6 +702,7 @@ class TestES(object):
     def test_index_single_document_twice_different_type(self, mock_bulk, mock_settings, mock_api, mock_engine):
         obj = es.ES('Foo', 'foondex', chunk_size=10)
         mock_engine.is_object_document = Mock(return_value=True)
+        mock_settings.asbool.return_value = True
 
         first_document = Mock()
         first_document.to_indexable_dict = Mock(return_value={'_pk': 1, 'name': 'foo', '_type': 'Item'})
@@ -726,6 +736,7 @@ class TestES(object):
     def test_index_single_document_twice_multiple_index_different_type(self, mock_bulk, mock_settings, mock_api, mock_engine):
         obj = es.ES('Foo', 'foondex', chunk_size=10)
         mock_engine.is_object_document = Mock(return_value=True)
+        mock_settings.asbool.return_value = True
 
         first_document = Mock()
         first_document.to_indexable_dict = Mock(return_value={'_pk': 1, 'name': 'foo', '_type': 'Item'})
@@ -757,6 +768,7 @@ class TestES(object):
     def test_index_single_document_twice_multiple_index(self, mock_bulk, mock_settings, mock_api, mock_engine):
         obj = es.ES('Foo', 'foondex', chunk_size=10)
         mock_engine.is_object_document = Mock(return_value=True)
+        mock_settings.asbool.return_value = True
 
         first_document = Mock()
         first_document.to_indexable_dict = Mock(return_value={'_pk': 1, 'name': 'foo', '_type': 'Doc'})
@@ -1087,6 +1099,7 @@ class TestES(object):
         mock_mget.return_value = {'docs': [
             {'_id': '2', 'name': 'bar', 'found': True}
         ]}
+        mock_settings.asbool.return_value = True
 
         obj.index_missing_documents(documents)
 
@@ -1115,6 +1128,7 @@ class TestES(object):
             {'_pk': 1, 'name': 'foo'},
         ]
         mock_mget.side_effect = es.IndexNotFoundException()
+        mock_settings.asbool.return_value = True
         obj.index_missing_documents(documents)
         mock_mget.assert_called_once_with(
             index='foondex',
