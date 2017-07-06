@@ -1,7 +1,6 @@
 from __future__ import absolute_import
 import json
 import threading
-from collections import OrderedDict
 import logging
 from functools import partial
 from collections import defaultdict
@@ -287,7 +286,7 @@ class ESActionRegistry(threading.local):
         """
         conflicts = []
         for error in exc.errors:
-            for action, response in error.items():
+            for response in error.values():
                 if response['status'] == 409:
                     log.error('CONFLICT DETECTED {response}'.format(response=response))
                     document = engine.reload_document(_type=response['_type'],_id=response['_id'])
