@@ -5,6 +5,9 @@ import json
 import six
 from pyramid.settings import asbool
 from nefertari.utils import drop_reserved_params
+from nefertari.json_httpexceptions import httperrors
+from pyramid import httpexceptions as http_exc
+
 
 log = logging.getLogger(__name__)
 
@@ -149,3 +152,27 @@ def enable_selfalias(config, id_name):
             request.matchdict[id_name] = user.username
 
     config.add_subscriber(context_found_subscriber, ContextFound)
+
+
+def es_tween(handler, registry):
+    """
+    ES_tween called after pyramid_tm, so we can check if SQL transaction commited sucessfuly or with errors.
+    If response returned by handler:function will have status > 400 that means something went wrong and we should not index any changes.
+    """
+    log.info('ES tween enabled')
+    from nefertari.elasticsearch import ES
+
+    def es_tween(request):
+        try:
+            ES.registry.bind(request)
+            response = handler(request)
+
+            if response.status_code < 300:
+                ES.registry.bulk_index()
+
+        except http_exc.HTTPException as exc:
+            response = httperrors(context=exc, request=request)
+        finally:
+            ES.registry.clean()
+        return response
+    return es_tween

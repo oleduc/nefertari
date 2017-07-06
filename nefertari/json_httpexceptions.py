@@ -89,10 +89,7 @@ class JBase(object):
 
 thismodule = sys.modules[__name__]
 
-http_exceptions = list(http_exc.status_map.values()) + [
-    http_exc.HTTPBadRequest,
-    http_exc.HTTPInternalServerError,
-]
+http_exceptions = list(http_exc.status_map.values())
 
 for exc_cls in http_exceptions:
     name = "J%s" % exc_cls.__name__

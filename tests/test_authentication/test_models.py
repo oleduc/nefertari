@@ -254,44 +254,39 @@ class TestAuthModelMethodsMixin(object):
         assert str(ex.value) == 'Failed to create account.'
         mock_get.assert_called_once_with(email=3, defaults={'email': 3})
 
-    @patch('nefertari.authentication.models.authenticated_userid')
     @patch('nefertari.authentication.models.cache_request_user')
     def test_get_authuser_by_userid(
-            self, mock_cache, mock_auth, engine_mock):
+            self, mock_cache, engine_mock):
         from nefertari.authentication import models
-        mock_auth.return_value = 123
         request = Mock()
+        request.authenticated_userid = 123
         models.AuthModelMethodsMixin.get_authuser_by_userid(request)
-        mock_auth.assert_called_once_with(request)
         mock_cache.assert_called_once_with(
             models.AuthModelMethodsMixin, request, 123)
 
-    @patch('nefertari.authentication.models.authenticated_userid')
     @patch('nefertari.authentication.models.cache_request_user')
     def test_get_authuser_by_userid_not_authenticated(
-            self, mock_cache, mock_auth, engine_mock):
+            self, mock_cache, engine_mock):
         from nefertari.authentication import models
-        mock_auth.return_value = None
-        models.AuthModelMethodsMixin.get_authuser_by_userid(1)
-        mock_auth.assert_called_once_with(1)
+        request = Mock()
+        request.authenticated_userid = None
+        models.AuthModelMethodsMixin.get_authuser_by_userid(request)
         assert not mock_cache.called
 
-    @patch('nefertari.authentication.models.authenticated_userid')
     @patch(mixin_path + 'get_item')
     def test_get_authuser_by_name(
-            self, mock_res, mock_auth, engine_mock):
+            self, mock_res,  engine_mock):
         from nefertari.authentication import models
-        mock_auth.return_value = 'user1'
-        models.AuthModelMethodsMixin.get_authuser_by_name(1)
-        mock_auth.assert_called_once_with(1)
+        request = Mock()
+        request.authenticated_userid = 'user1'
+        models.AuthModelMethodsMixin.get_authuser_by_name(request)
         mock_res.assert_called_once_with(username='user1')
 
-    @patch('nefertari.authentication.models.authenticated_userid')
     @patch(mixin_path + 'get_item')
     def test_get_authuser_by_name_not_authenticated(
-            self, mock_res, mock_auth, engine_mock):
+            self, mock_res, engine_mock):
         from nefertari.authentication import models
-        mock_auth.return_value = None
-        models.AuthModelMethodsMixin.get_authuser_by_name(1)
-        mock_auth.assert_called_once_with(1)
+        request = Mock()
+        request.authenticated_userid = None
+        models.AuthModelMethodsMixin.get_authuser_by_name(request)
         assert not mock_res.called

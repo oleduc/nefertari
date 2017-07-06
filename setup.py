@@ -17,6 +17,7 @@ install_requires = [
     'zope.dottedname',
     'cryptacular',
     'six',
+    'pyramid_tm'
 ]
 
 setup(
