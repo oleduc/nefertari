@@ -54,7 +54,11 @@ class TestProcessors:
 
     def test_match_term(self):
         term_builder = TermBuilder()
-        assert term_builder('field:first value and second value') == {'match': {'field': 'first value and second value'}}
+        assert term_builder('field:First') == {'match': {'field': 'First'}}
+
+    def test_match_phrase_term(self):
+        term_builder = TermBuilder()
+        assert term_builder('field:first value and second value') == {'match_phrase': {'field': 'first value and second value'}}
 
     def test_wildcard(self):
         term_builder = TermBuilder()
@@ -75,10 +79,20 @@ class TestProcessors:
         term_builder = TermBuilder()
         assert term_builder('username:_missing_') == {'missing': {'field': 'username'}}
 
+    def test_match_phrase_boost_term(self):
+        boost_params = ['field:10']
+        term_builder = TermBuilder(boost_params)
+        assert term_builder('field:match value') == {'match_phrase': {'field': {'boost': 10, 'query': 'match value'}}}
+
     def test_match_boost_term(self):
         boost_params = ['field:10']
         term_builder = TermBuilder(boost_params)
-        assert term_builder('field:match value') == {'match': {'field': {'boost': 10, 'query': 'match value'}}}
+        assert term_builder('field:Match') == {'match': {'field': {'boost': 10, 'query': 'Match'}}}
+
+    def test_term_boost_term(self):
+        boost_params = ['field:10']
+        term_builder = TermBuilder(boost_params)
+        assert term_builder('field:match') == {'term': {'field': {'boost': 10, 'value': 'match'}}}
 
     def test_boost_term(self):
         boost_params = ['field:10']
@@ -104,15 +118,35 @@ class TestProcessors:
     def test_match_all_boost_term(self):
         boost_params = ['field:10', 'another_field:12']
         term_builder = TermBuilder(boost_params)
+        result = term_builder('_all:value')
+        assert 'bool' in result
+        assert 'should' in result['bool']
+        assert 'minimum_should_match' in result['bool']
+        assert result['bool']['minimum_should_match'] == 1
+        print(result)
+        expected_terms = [{'match': {'_all': 'value'}},
+                                {'match': {'field': {'boost': '10',
+                                                     'query': 'value'}}},
+                                {'match': {'another_field': {'boost': '12',
+                                                     'query': 'value'}}}]
+
+        for term in result['bool']['should']:
+            assert term in expected_terms
+            expected_terms.remove(term)
+
+    def test_match_phrase_all_boost_term(self):
+        boost_params = ['field:10', 'another_field:12']
+        term_builder = TermBuilder(boost_params)
         result = term_builder('_all:value and value')
         assert 'bool' in result
         assert 'should' in result['bool']
         assert 'minimum_should_match' in result['bool']
         assert result['bool']['minimum_should_match'] == 1
-        expected_terms = [{'match': {'_all': 'value and value'}},
-                                {'match': {'field': {'boost': '10',
+        print(result)
+        expected_terms = [{'match_phrase': {'_all': 'value and value'}},
+                                {'match_phrase': {'field': {'boost': '10',
                                                      'query': 'value and value'}}},
-                                {'match': {'another_field': {'boost': '12',
+                                {'match_phrase': {'another_field': {'boost': '12',
                                                      'query': 'value and value'}}}]
 
         for term in result['bool']['should']:
@@ -413,8 +447,9 @@ class TestESQueryCompilation(object):
         query_string = '(assignments.assignee_id:john   smith) AND (assignments.is_completed:true)'
         params = {'es_q': query_string, '_boost': 'assignments.assignee_id:5,assignments.is_completed:10'}
         result = compile_es_query(params)
+        print(result)
         assert result == {'bool': {'must': [{'bool': {'must': [{'nested': {'query': {'bool': {
-            'must': [{'match': {'assignments_nested.assignee_id': {'query': 'john   smith', 'boost': 5}}},
+            'must': [{'match_phrase': {'assignments_nested.assignee_id': {'query': 'john   smith', 'boost': 5}}},
                      {'term': {'assignments_nested.is_completed': {'value': 'true', 'boost': 10}}}]}},
                                                         'path': 'assignments_nested'}}]}}]}}
 
