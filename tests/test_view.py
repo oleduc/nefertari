@@ -257,15 +257,15 @@ class TestBaseView(object):
     @patch('nefertari.view.BaseView.set_public_limits')
     def test_run_init_actions(self, limit, conv, setpub):
         request = Mock(
-            content_type='text/plain',
-            json={'param1.foo': 'val1', 'param3': 'val3'},
+            content_type='application/json',
+            json={},
             method='POST',
-            accept=['text/plain'],
+            accept=['application/json'],
         )
         request.params.mixed.return_value = {'param2.foo': 'val2'}
         DummyBaseView(context={'foo': 'bar'}, request=request)
         limit.assert_called_once_with()
-        conv.assert_called_once_with()
+        conv.assert_called_once_with({}, None)
         setpub.assert_called_once_with()
 
     @patch('nefertari.elasticsearch.ES')
@@ -386,7 +386,7 @@ class TestBaseView(object):
             _json_params={'foo': 'bar'})
         view.Model = 'Model1'
         eng.is_relationship_field.return_value = False
-        view.convert_ids2objects()
+        view.convert_ids2objects(view._json_params, view.Model)
         eng.is_relationship_field.assert_called_once_with('foo', 'Model1')
         assert not id2obj.called
 
@@ -400,9 +400,9 @@ class TestBaseView(object):
             _json_params={'foo': 'bar'})
         view.Model = 'Model1'
         eng.is_relationship_field.return_value = True
-        view.convert_ids2objects()
+        view.convert_ids2objects(view._json_params, view.Model)
         eng.get_relationship_cls.assert_called_once_with('foo', 'Model1')
-        id2obj.assert_called_once_with('foo', eng.get_relationship_cls())
+        id2obj.assert_called_once_with(view._json_params, 'foo', eng.get_relationship_cls())
 
     @patch('nefertari.view.wrappers')
     @patch('nefertari.view.BaseView._run_init_actions')
@@ -560,7 +560,7 @@ class TestBaseView(object):
             context={}, request=request, _json_params={'foo': 'bar'},
             _query_params={'foo1': 'bar1'})
         view._json_params['user'] = '1'
-        view.id2obj(name='user', model=model)
+        view.id2obj(view._json_params, name='user', model=model)
         assert view._json_params['user'] == 'foo'
         model.pk_field.assert_called_once_with()
         model.get_item.assert_called_once_with(
@@ -576,7 +576,7 @@ class TestBaseView(object):
             context={}, request=request, _json_params={'foo': 'bar'},
             _query_params={'foo1': 'bar1'})
         view._json_params['user'] = ['1']
-        view.id2obj(name='user', model=model)
+        view.id2obj(view._json_params, name='user', model=model)
         assert view._json_params['user'] == ['foo']
         model.pk_field.assert_called_once_with()
         model.get_item.assert_called_once_with(
@@ -589,7 +589,7 @@ class TestBaseView(object):
         view = DummyBaseView(
             context={}, request=request, _json_params={'foo': 'bar'},
             _query_params={'foo1': 'bar1'})
-        view.id2obj(name='asdasdasd', model=model)
+        view.id2obj(view._json_params, name='asdasdasd', model=model)
         assert not model.pk_field.called
         assert not model.get_item.called
 
@@ -603,7 +603,7 @@ class TestBaseView(object):
             context={}, request=request, _json_params={'foo': 'bar'},
             _query_params={'foo1': 'bar1'})
         view._json_params['user'] = '1'
-        view.id2obj(name='user', model=model, setdefault=123)
+        view.id2obj(view._json_params, name='user', model=model, setdefault=123)
         assert view._json_params['user'] == 123
         model.pk_field.assert_called_once_with()
         model.get_item.assert_called_once_with(
@@ -620,8 +620,8 @@ class TestBaseView(object):
             _query_params={'foo1': 'bar1'})
         view._json_params['users'] = [None, '1']
         view._json_params['story'] = None
-        view.id2obj(name='users', model=model)
-        view.id2obj(name='story', model=model)
+        view.id2obj(view._json_params, name='users', model=model)
+        view.id2obj(view._json_params, name='story', model=model)
         assert view._json_params['users'] == [None, 'foo']
         assert view._json_params['story'] is None
 
@@ -636,7 +636,7 @@ class TestBaseView(object):
             context={}, request=request, _json_params={'foo': 'bar'},
             _query_params={'foo1': 'bar1'})
         view._json_params['user'] = id_
-        view.id2obj(name='user', model=model, setdefault=123)
+        view.id2obj(view._json_params, name='user', model=model, setdefault=123)
         assert view._json_params['user'] == id_
         model.pk_field.assert_called_once_with()
         assert not model.get_item.called
@@ -652,7 +652,7 @@ class TestBaseView(object):
             _query_params={'foo1': 'bar1'})
         view._json_params['user'] = '1'
         with pytest.raises(JHTTPBadRequest) as ex:
-            view.id2obj(name='user', model=model)
+            view.id2obj(view._json_params, name='user', model=model)
         assert str(ex.value) == 'id2obj: Object 1 not found'
 
 

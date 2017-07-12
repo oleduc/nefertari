@@ -2,7 +2,7 @@ import uuid
 import logging
 
 import cryptacular.bcrypt
-from pyramid.security import authenticated_userid, forget
+from pyramid.security import forget
 
 from nefertari.json_httpexceptions import JHTTPBadRequest
 from nefertari import engine
@@ -131,7 +131,7 @@ class AuthModelMethodsMixin(object):
         Used by Ticket-based auth. Is added as request method to populate
         `request.user`.
         """
-        userid = authenticated_userid(request)
+        userid = request.authenticated_userid
         if userid:
             cache_request_user(cls, request, userid)
             return request._user
@@ -143,7 +143,7 @@ class AuthModelMethodsMixin(object):
         Used by Token-based auth. Is added as request method to populate
         `request.user`.
         """
-        username = authenticated_userid(request)
+        username = request.authenticated_userid
         if username:
             return cls.get_item(username=username)
 

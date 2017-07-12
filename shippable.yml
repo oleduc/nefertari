@@ -1,0 +1,31 @@
+language: python
+
+python:
+  - 3.3
+  - 3.4
+  - 3.5
+
+env:
+    global:
+      - PYTHONHASHSEED=0 #NEEDED?
+
+build:
+
+    ci:
+      - pip install -r requirements.dev
+      - pip install -U pytest
+      - mkdir -p shippable/testresults
+      - mkdir -p shippable/codecoverage
+      - pytest --cov-report xml:shippable/codecoverage/cov.xml --cov-report term --cov nefertari tests --junit-xml=shippable/testresults/results.xml
+
+integrations:
+    notifications:
+        - integrationName: email
+          type: email
+          recipients:
+            #- cerri_be_devs@cerri.com
+            - blaurent@cerri.com
+          on_start: false
+          on_success: false
+          on_failure: true
+          on_pull_request: true

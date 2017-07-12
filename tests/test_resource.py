@@ -47,6 +47,7 @@ def get_test_view_class(name=''):
 
 def _create_config():
     config = Configurator(autocommit=True)
+    config.include('pyramid_tm')
     config.include('nefertari')
     return config
 

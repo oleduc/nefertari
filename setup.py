@@ -8,14 +8,16 @@ VERSION = open(os.path.join(here, 'VERSION')).read()
 
 install_requires = [
     'pyramid',
+    'transaction',
     'tempita',
     'requests',
     'simplejson',
-    'elasticsearch',
+    'elasticsearch==2.4.0',
     'blinker',
     'zope.dottedname',
     'cryptacular',
     'six',
+    'pyramid_tm'
 ]
 
 setup(

@@ -69,9 +69,8 @@ class TestJSONHTTPExceptionsModule(object):
         assert body['message'] == 'foo'
         assert body['_pk'] == 'api'
 
-    @patch.object(jsonex, 'add_stack')
+    @patch.object(jsonex, 'add_stack', return_value='foo', unsafe=True)
     def test_create_json_response_stack_calls(self, mock_stack):
-        mock_stack.return_value = 'foo'
         obj = Mock(status_int=401, location='http://example.com/api')
         jsonex.create_json_response(obj, None, encoder=_JSONEncoder)
         assert mock_stack.call_count == 0

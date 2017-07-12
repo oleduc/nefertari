@@ -1,25 +1,30 @@
 from __future__ import absolute_import
-import copy
 import json
+import threading
 import logging
 from functools import partial
 from collections import defaultdict
+import os
+from datetime import datetime
+
 
 import elasticsearch
+from elasticsearch.exceptions import TransportError, ElasticsearchException
 from elasticsearch import helpers
-import os
 import six
 
+
 from nefertari.utils import (
-    dictset, dict2proxy, process_limit, split_strip, to_dicts, DataProxy)
-from nefertari.json_httpexceptions import (
-    JHTTPBadRequest, JHTTPNotFound, exception_response)
+    dictset, dict2proxy, process_limit, split_strip, DataProxy)
+from nefertari.json_httpexceptions import (JHTTPBadRequest, JHTTPNotFound,
+                                           exception_response, JHTTPUnprocessableEntity)
 from nefertari import engine, RESERVED_PARAMS
+from nefertari.es_query import compile_es_query, apply_analyzer
 
 log = logging.getLogger(__name__)
 
 
-class IndexNotFoundException(Exception):
+class IndexNotFoundException(ElasticsearchException):
     pass
 
 
@@ -39,7 +44,8 @@ class ESHttpConnection(elasticsearch.Urllib3HttpConnection):
             message = error_dict['error']
         except (KeyError, IndexError):
             return
-        raise exception_response(400, detail=message)
+        log.error('Unexpected ES ERROR ->{}'.format(raw_data))
+        raise exception_response(503, explanation=message)
 
     def perform_request(self, *args, **kw):
         try:
@@ -49,13 +55,19 @@ class ESHttpConnection(elasticsearch.Urllib3HttpConnection):
                     msg = msg[:300] + '...TRUNCATED...' + msg[-212:]
                 log.debug(msg)
             resp = super(ESHttpConnection, self).perform_request(*args, **kw)
-        except Exception as e:
-            log.error(e.error)
+        except TransportError as e:
+            log.error('Elasticsearch ERROR ->{}'.format(e))
             status_code = e.status_code
             if status_code == 404 and 'IndexMissingException' in e.error:
+                log.error(str(e))
                 raise IndexNotFoundException()
             if status_code == 'N/A':
                 status_code = 400
+            if status_code == 'TIMEOUT':
+                status_code = 504
+            if status_code == 409:
+                raise
+
             raise exception_response(
                 status_code,
                 explanation=six.b(e.error),
@@ -69,11 +81,18 @@ def includeme(config):
     Settings = dictset(config.registry.settings)
     ES.setup(Settings)
 
+    create_index_with_settings(Settings)
+
+    if ES.settings.asbool('enable_polymorphic_query'):
+        config.include('nefertari.polymorphic')
+
+
+def create_index_with_settings(settings):
     # Load custom index settings
     index_settings = None
     index_settings_path = None
-    if "elasticsearch.index.settings_file" in Settings:
-        index_settings_path = Settings["elasticsearch.index.settings_file"]
+    if "elasticsearch.index.settings_file" in settings:
+        index_settings_path = settings["elasticsearch.index.settings_file"]
 
         if not os.path.exists(index_settings_path):
             raise Exception("Custom index settings file does not exist : '{file_name}'".format(
@@ -93,33 +112,10 @@ def includeme(config):
                 ))
 
     ES.create_index(index_settings=index_settings)
-    if ES.settings.asbool('enable_polymorphic_query'):
-        config.include('nefertari.polymorphic')
 
 
-def _bulk_body(documents_actions, request):
-    kwargs = {
-        'client': ES.api,
-        'actions': documents_actions,
-    }
-
-    if request is None:
-        query_params = {}
-    else:
-        query_params = request.params.mixed()
-
-    query_params = dictset(query_params)
-    refresh_enabled = ES.settings.asbool('enable_refresh_query')
-
-    if '_refresh_index' in query_params and refresh_enabled:
-        kwargs['refresh'] = query_params.asbool('_refresh_index')
-
-    executed_num, errors = helpers.bulk(**kwargs)
-    log.info('Successfully executed {} Elasticsearch action(s)'.format(
-        executed_num))
-    if errors:
-        raise Exception('Errors happened when executing Elasticsearch '
-                        'actions'.format('; '.join(errors)))
+def _bulk_body(documents_actions):
+    ES.registry.add(ESAction(actions=documents_actions))
 
 
 def process_fields_param(fields):
@@ -245,10 +241,236 @@ class DocumentProxy(object):
         raise UnknownDocumentProxiesTypeError('You have no proxy for this %s document type' % doc_type)
 
 
+class ESActionRegistry(threading.local):
+    """
+    Object which manage indexation. Should be used as context manager for starting indexation.
+    """
+    def __init__(self):
+        self.registry = []
+        self.request = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.clean()
+
+    def bulk_index(self):
+        """
+        Entry point for indexation process. Should be called inside context manager:
+        with ES.registry as es_registry:
+            es_registry.bulk_index()
+        May produce exception so we should clean up resources after each call of this function.
+        """
+        if len(self.registry):
+            try:
+
+                self.force_indexation(actions=self.registry, request=self.request)
+            except ElasticsearchException as exc:
+                self.clean()
+                self.reindex_conflicts(exc)
+                log.error(
+                    'Exception during indexing items {}. You should manually call nefertari.index for reindex items'
+                    .format(exc))
+            finally:
+                self.clean()
+        else:
+            log.warning("There is no indexation actions for request {}".format(self.request))
+
+    def bind(self, request):
+        self.request = request
+
+    def reindex_conflicts(self, exc):
+        """
+        Check response returned by bulk request to elasticsearch and if it contains conflicts try to reload document from SQL storage and reindex it
+        """
+        conflicts = []
+        for error in exc.errors:
+            for response in error.values():
+                if response['status'] == 409:
+                    log.error('CONFLICT DETECTED {response}'.format(response=response))
+                    document = engine.reload_document(_type=response['_type'],_id=response['_id'])
+                    if document:
+                        _type = document.pop('_type')
+                        conflicts.append({
+                            '_type': _type,
+                            '_id': document['_pk'],
+                            '_op_type': 'index',
+                            '_index': response['_index'],
+                            '_source': document
+                        })
+
+        if conflicts:
+            self.force_indexation(actions=[ESAction(actions=conflicts)], request=self.request)
+
+    def clean(self):
+        self.registry = []
+        self.request = None
+
+    def add(self, es_action):
+        self.registry.append(es_action)
+
+    @staticmethod
+    def split_actions_by_op_type(actions):
+        op_types = defaultdict(list)
+        for action in actions:
+            for action_op_type in action.op_types:
+                op_types[action_op_type].extend(action.op_types[action_op_type])
+        return op_types
+
+    @staticmethod
+    def force_indexation(actions, request=None):
+        refresh_index = ES.settings.get('enable_refresh_query', False) and ES.settings.asbool('enable_refresh_query')
+        es_data = []
+        splitted_actions = ESActionRegistry.split_actions_by_op_type(actions)
+
+        for op_type in splitted_actions.keys():
+            op_type_actions = splitted_actions[op_type]
+            types = set()
+
+            for item in op_type_actions:
+                types.add(item.entity_type)
+            for type_ in types:
+                results = [item for item in ESActionRegistry.get_latest_change(filter(lambda i: i.entity_type == type_,
+                                                                                      op_type_actions))]
+                es_data.extend(results)
+
+        es_data = ESActionRegistry.prepare_for_deletion(es_data)
+        flat_actions = [data.action for data in es_data]
+
+        if request:
+            query_params = request.params.mixed()
+            refresh_index = query_params.get('_refresh_index', refresh_index)
+            refresh_parent = query_params.get('_refresh_parent', False)
+        else:
+            refresh_parent = False
+
+        if refresh_parent:
+            ESActionRegistry.refresh_parent_document(flat_actions, request)
+
+        kwargs = {
+            'client': ES.api,
+            'actions': flat_actions,
+            'refresh': refresh_index
+        }
+
+        helpers.bulk(**kwargs)
+        log.debug('Successfully executed {} elasticsearch actions'.format(list(map(lambda x: (x['_op_type'], x['_type'], x['_id']),kwargs['actions']))))
+
+    @staticmethod
+    def get_latest_change(es_data):
+        """
+        :param es_data: List of ESData instances of one type of instance (example _type:Task).
+        This list can contains few ESData objects related to the same entity.
+        We should get only last created ESData object.
+        :return: ESData, latest changes related to entity.
+        """
+        ids = defaultdict(list)
+        for item in es_data:
+            ids[item.id].append(item)
+
+        for i in ids:
+            yield max(ids[i], key=lambda x: x.creation_time)
+
+    @staticmethod
+    def refresh_parent_document(flat_actions, request):
+        if engine.is_object_document(request.context):
+            request.context.refresh()
+            instance = request.context
+        else:
+            response = request.response.json_body
+            item_type = response['_type']
+            item_cls = engine.get_document_cls(item_type)
+            item_id = response[item_cls.pk_field()]
+            instance = item_cls.get_item(**{item_cls.pk_field(): item_id})
+
+        to_refresh = []
+
+        for document, _ in instance.get_parent_documents(nested_only=True):
+            indexable_document = document.to_indexable_dict()
+            to_refresh.append(indexable_document)
+
+        for action in flat_actions:
+            if '_source' not in action:
+                continue
+            for refreshed_document in reversed(to_refresh):
+                if refreshed_document['_type'] == action['_type'] and refreshed_document['_pk'] == action['_id'] and action['_op_type'] == 'index':
+                    to_refresh.remove(refreshed_document)
+                    del refreshed_document['_type']
+                    action['_source'] = refreshed_document
+
+        if to_refresh:
+            index_name = flat_actions[0]['_index']
+            for refreshed_document in to_refresh:
+                doc_type = refreshed_document.pop('_type')
+                flat_actions.append({
+                    '_op_type': 'index',
+                    '_type': doc_type,
+                    '_index': index_name,
+                    '_id': refreshed_document['_pk'],
+                    '_source': refreshed_document
+                })
+
+
+    @staticmethod
+    def prepare_for_deletion(es_data):
+        """
+        :param es_data: List of ESData instances with different operations
+        This function detects items which should be deleted and remove all index actions related to this instance.
+        :return: filtered list of ESData instances
+        """
+        to_delete = list(filter(lambda i: i.op_type == 'delete', es_data))
+        results = []
+
+        if not to_delete:
+            return es_data
+
+        def should_be_deleted(data):
+            for item in to_delete:
+                if data.entity_type == item.entity_type and data.id == item.id and data.op_type != 'delete':
+                    return True
+            return False
+
+        for item in reversed(es_data):
+            if not should_be_deleted(item):
+                results.append(item)
+
+        return results
+
+
+class ESData:
+    """
+    Contains information about data which should be indexed.
+    """
+    def __init__(self, action: dict, creation_time):
+        self.action = action
+        self.creation_time = creation_time
+        self.entity_type = action['_type']
+        self.id = str(action['_id'])
+        self.op_type = action['_op_type']
+
+    def __repr__(self):
+        return str(self.op_type) + ' ' + str(self.id) + ' ' + self.entity_type + ' ' + str(self.creation_time)
+
+
+class ESAction:
+
+    def __init__(self, **params):
+        self.op_types = defaultdict(list)
+        self.creation_time = datetime.now()
+
+        for action in params['actions']:
+            self.op_types[action['_op_type']].append(ESData(action=action, creation_time=self.creation_time))
+
+    def __repr__(self):
+        return str(self.op_types)
+
+
 class ES(object):
     api = None
     settings = None
     document_proxy = DocumentProxy
+    registry = ESActionRegistry()
 
     @classmethod
     def src2type(cls, source):
@@ -269,14 +491,18 @@ class ES(object):
 
             params = {}
             if cls.settings.asbool('sniff'):
-                params = dict(
+                params.update(dict(
                     sniff_on_start=True,
                     sniff_on_connection_fail=True
-                )
+                ))
+
+            if cls.settings.asbool('retry_on_timeout'):
+                params['retry_on_timeout'] = True
 
             cls.api = elasticsearch.Elasticsearch(
                 hosts=hosts, serializer=engine.ESJSONSerializer(),
                 connection_class=ESHttpConnection, **params)
+
             log.info('Including Elasticsearch. %s' % cls.settings)
 
         except AttributeError as e:
@@ -431,7 +657,6 @@ class ES(object):
     def prep_bulk_documents(self, action, documents):
         if not isinstance(documents, list):
             documents = [documents]
-
         docs_actions = []
         for doc in documents:
             if not isinstance(doc, dict):
@@ -456,43 +681,41 @@ class ES(object):
 
         return docs_actions
 
-    def _bulk(self, action, documents, request=None):
+    def _bulk(self, action, documents):
         if not documents:
             log.debug('Empty documents: %s' % self.doc_type)
             return
-
         documents_actions = self.prep_bulk_documents(action, documents)
-
         if documents_actions:
-            operation = partial(_bulk_body, request=request)
+            operation = partial(_bulk_body)
             self.process_chunks(
                 documents=documents_actions,
                 operation=operation)
         else:
             log.warning('Empty body')
 
-    def index(self, documents, request=None, **kwargs):
+    def index(self, documents, **kwargs):
         if isinstance(documents, list):
-            self.index_documents(documents, request=request)
+            self.index_documents(documents)
         elif isinstance(documents, set):
-            self.index_documents(list(documents), request=request)
+            self.index_documents(list(documents))
         elif engine.is_object_document(documents):
-            self._bulk('index', documents.to_indexable_dict(), request)
+            self._bulk('index', documents.to_indexable_dict())
         else:
             raise TypeError(
                 'Documents type must be `list`,`set` or `BaseDocument` not a `{}`'.format(
                     type(documents).__name__))
 
-    def index_document(self, document, request=None):
+    def index_document(self, document):
         if engine.is_object_document(document):
             """ Reindex all `document`s. """
-            self._bulk('index', document.to_indexable_dict(), request)
+            self._bulk('index', document.to_indexable_dict())
         else:
             raise TypeError(
                 'Document type must be an instance of a type extending `BaseDocument` not a `{}`'.format(
                     type(document).__name__))
 
-    def index_documents(self, documents, request=None):
+    def index_documents(self, documents):
         dict_documents = []
 
         for document in documents:
@@ -503,9 +726,9 @@ class ES(object):
                                 "BaseDocument")
 
         """ Reindex all `document`s. """
-        self._bulk('index', dict_documents, request)
+        self._bulk('index', dict_documents,)
 
-    def index_nested_document(self, parent, field, target, request=None):
+    def index_nested_document(self, parent, field, target):
         actions = []
         _doc_type = self.src2type(getattr(parent, '_type', self.doc_type))
         target_field = getattr(parent, field)
@@ -529,9 +752,9 @@ class ES(object):
         else:
             raise Exception("A nested document that is not in a list should not use partial update.")
 
-        _bulk_body(actions, request)
+        _bulk_body(actions)
 
-    def index_missing_documents(self, documents, request=None):
+    def index_missing_documents(self, documents):
         """ Index documents that are missing from ES index.
 
         Determines which documents are missing using ES `mget` call which
@@ -564,14 +787,23 @@ class ES(object):
                      'index `{}`'.format(self.doc_type, self.index_name))
             return
 
-        self._bulk('index', documents, request)
+        self._bulk('index', documents)
 
-    def delete(self, ids, request=None):
+    def delete(self, ids):
         if not isinstance(ids, list):
             ids = [ids]
 
-        documents = [{'_pk': _id, '_type': self.doc_type} for _id in ids]
-        self._bulk('delete', documents, request=request)
+        actions = []
+
+        for _id in ids:
+            action = {
+                '_op_type': 'delete',
+                '_index': self.index_name,
+                '_type': self.doc_type,
+                '_id': _id
+            }
+            actions.append(action)
+        self.registry.add(ESAction(actions=actions))
 
     def get_by_ids(self, ids, **params):
         if not ids:
@@ -682,37 +914,46 @@ class ES(object):
         )
         _raw_terms = params.pop('q', '')
 
-        if 'body' not in params:
+        if 'body' not in params and 'es_q' not in params:
+            analyzed_terms = apply_analyzer(params, self.doc_type, engine.get_document_cls)
+
             query_string = self.build_qs(params.remove(RESERVED_PARAMS), _raw_terms)
+
+            query = {'must': []}
+
             if query_string:
-                _params['body'] = {
-                    'query': {
-                        'query_string': {
-                            'query': query_string
-                        }
-                    }
-                }
+                query['must'].append({'query_string': {'query': query_string}})
+
+            if analyzed_terms:
+                query['must'].append(analyzed_terms)
+
+            if query['must']:
+                _params['body'] = {'query': {'bool': query}}
             else:
-                _params['body'] = {"query": {"match_all": {}}}
-        else:
-            _params['body'] = params['body']
+                _params['body'] = {'query': {'match_all': {}}}
+
+        if 'body' in params:
+            raise JHTTPUnprocessableEntity('Illegal parameter "body"')
+
         if '_limit' not in params:
             params['_limit'] = self.api.count(index=self.index_name)['count']
-
         _params['from_'], _params['size'] = process_limit(
             params.get('_start', None),
             params.get('_page', None),
             params['_limit'])
 
-        if '_nested' in params:
-            if 'query' in _params['body']:
-                old_query = _params['body']['query']
-                _params['body']['query'] = {'bool': {'must': []}}
-                nested = dict()
+        if 'es_q' in params:
+            _params['body'] = {}
 
-                nested['nested'] = self.build_nested_query(params)
-                _params['body']['query']['bool']['must'].append(nested)
-                _params['body']['query']['bool']['must'].append(old_query)
+            try:
+                _params['body']['query'] = compile_es_query(params)
+            except Exception as exc:
+                log.exception('es_q parsing error: {exc}'.format(exc=exc))
+                raise JHTTPBadRequest('Bad query string for {params}'
+                                        .format(
+                                                params=_params['body']['query']['query_string']['query']))
+
+            log.debug('Parsed ES request body {body}'.format(body=_params['body']['query']))
 
         if '_sort' in params and self.proxy:
             params['_sort'] = substitute_nested_terms(params['_sort'], self.proxy.substitutions)
@@ -740,11 +981,19 @@ class ES(object):
 
                 search_fields[index] = search_field + '^' + str(index + 1)
 
-            current_qs = _params['body']['query']['query_string']
+            must_query = _params['body']['query']['bool']['must']
+            query_string = {}
 
-            if isinstance(current_qs, str):
-                _params['body']['query']['query_string'] = {'query': current_qs}
-            _params['body']['query']['query_string']['fields'] = search_fields
+            for query_item in must_query:
+                if 'query_string' in query_item:
+                    query_string = query_item
+                    break
+
+            current_qs = query_string.get('query_string', None)
+
+            if current_qs:
+                query_string['query_string']['fields'] = search_fields
+
         return _params
 
     def do_count(self, params):
@@ -756,39 +1005,6 @@ class ES(object):
             return self.api.count(**params)['count']
         except IndexNotFoundException:
             return 0
-
-    def build_nested_query(self, params):
-        nested_string = params.pop('_nested')
-        nested_query = ''
-        path_position = None
-        start_index = 0
-        in_quotes = False
-        for index, key in enumerate(nested_string):
-
-            if key == ' ':
-                start_index = index
-
-            if key == '"' and not in_quotes:
-                in_quotes = True
-                key = ''
-            elif key == '"' and in_quotes:
-                in_quotes = False
-                key = ''
-
-            if key == '.' and not in_quotes:
-                key = '_nested.'
-                if not path_position:
-                    path_position = (start_index, index)
-
-            nested_query = nested_query + key
-
-        start_index, end_index = path_position
-        path = (nested_string[start_index:end_index] + '_nested').strip()
-
-        _params = build_nested_terms(nested_query)
-        return {'path': path, 'query': {'bool': _params}}
-
-
 
     def aggregate(self, **params):
         """ Perform aggreration
@@ -914,7 +1130,7 @@ class ES(object):
         return dict2proxy(data, self.proxy)
 
     @classmethod
-    def index_relations(cls, db_obj, request=None, **kwargs):
+    def index_relations(cls, db_obj, **kwargs):
         for model_cls, documents in db_obj.get_related_documents(**kwargs):
             if getattr(model_cls, '_index_enabled', False) and documents:
                 children_to_index = []
@@ -924,10 +1140,10 @@ class ES(object):
                     if getattr(child, pk_name) is not None:
                         children_to_index.append(child)
 
-                cls(model_cls.__name__).index_documents(children_to_index, request=request)
+                cls(model_cls.__name__).index_documents(children_to_index)
 
     @classmethod
-    def bulk_index_relations(cls, items, request=None, **kwargs):
+    def bulk_index_relations(cls, items, **kwargs):
         """ Index objects related to :items: in bulk.
         Related items are first grouped in map
         {model_name: {item1, item2, ...}} and then indexed.
@@ -945,4 +1161,4 @@ class ES(object):
                     index_map[model_cls.__name__].update(related_items)
 
         for model_name, instances in index_map.items():
-            cls(model_name).index_documents(instances, request=request)
+            cls(model_name).index_documents(instances)

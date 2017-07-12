@@ -1,133 +1,343 @@
-from argparse import ArgumentParser
 import sys
 import logging
+import math
+import time
+from argparse import ArgumentParser
+from multiprocessing import Process, Manager
+from datetime import datetime
 
 from pyramid.paster import bootstrap
 from pyramid.config import Configurator
+from pyramid_sqlalchemy import BaseObject
+from sqlalchemy import text
 from six.moves import urllib
 
 from nefertari.utils import dictset, split_strip, to_dicts, to_indexable_dicts
-from nefertari.elasticsearch import ES
+from nefertari.elasticsearch import ES, create_index_with_settings
 from nefertari import engine
 
 
-def main(argv=sys.argv, quiet=False):
+def main(argv=sys.argv):
+
+    parser = ArgumentParser(description=__doc__)
+
+    parser.add_argument(
+            '-c', '--config', help='config.ini (required)',
+            required=True)
+    parser.add_argument(
+            '--params', help='Url-encoded params for each model')
+    parser.add_argument('--index', help='Index name', default=None)
+    parser.add_argument(
+            '--chunk',
+            help=('Index chunk size. If chunk size not provided '
+                  '`elasticsearch.chunk_size` setting is used'),
+            type=int)
+
+    parser.add_argument('--processes',
+                        required=False,
+                        help='Split es action by multiple process',
+                        action='store',
+                        default=1,
+                        type=int)
+
+    parser.add_argument('--debug',
+                        required=False,
+                        help='Enable debug mode to check count for processed and existed item',
+                        action='store_true',
+                        default=False)
+
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument(
+            '--models',
+            help=('Comma-separated list of model names to index'))
+    group.add_argument(
+            '--recreate',
+            help='Recreate index and reindex all documents',
+            action='store_true',
+            default=False)
+
+    options = parser.parse_args()
+
+    if not options.config:
+        return parser.print_help()
+
+    processes = options.processes
+    manager = ProcessManager(processes)
+    app_registry = setup_app(options=options, put_mappings=True)
+
+    if options.recreate:
+        recreate_index(app_registry)
+        models = engine.get_document_classes()
+        model_names = [
+                name for name, model in models.items()
+                if getattr(model, '_index_enabled', False)]
+    else:
+        model_names = split_strip(options.models)
+
+    # Close all existed connections for avoid issue with concurrent access.
+    # more here: http://docs.sqlalchemy.org/en/latest/faq/connections.html#how-do-i-use-engines-connections-sessions-with-python-multiprocessing-or-os-fork
+    BaseObject.metadata.bind.dispose()
+
+    consumers = [TaskConsumer(options=options, settings=app_registry.settings, manager=manager) for _ in range(processes)]
+
+    producer = TaskProducer(options=options, model_names=model_names,
+                            manager=manager, consumers_count=processes)
+
+    results = process_tasks(consumers, producer, manager)
+
+    if options.debug:
+        _check_results(results)
+
+
+def _check_results(result):
+    initial_dict = {}
+    flat_list = []
+    log = get_logger()
+    log.setLevel(logging.INFO)
+
+    for item in result:
+        flat_list.extend(item)
+
+    for item in flat_list:
+        for key in item:
+            if key not in initial_dict:
+                initial_dict[key] = []
+            initial_dict[key].extend(item[key])
+
+    for model_name in initial_dict:
+        items_count = engine.get_document_cls(model_name).get_collection().count()
+        log.info('Total items count {} for model {}'.format(items_count, model_name))
+        log.info('Total indexed tems count {} for model {}'.format(len(set(initial_dict[model_name])), model_name))
+
+        assert len(initial_dict[model_name]) == len(set(initial_dict[model_name]))
+        assert len(initial_dict[model_name]) == items_count
+
+
+def process_tasks(consumers, producer, manager):
+    producer.start()
+
+    for c in consumers:
+        c.start()
+
+    manager.wait_for_exit()
+    producer.join()
+
+    return manager.results
+
+
+def get_logger():
     log = logging.getLogger()
     log.setLevel(logging.WARNING)
     ch = logging.StreamHandler()
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(message)s')
     ch.setFormatter(formatter)
     log.addHandler(ch)
-
-    command = ESCommand(argv, log)
-    return command.run()
+    return log
 
 
-class ESCommand(object):
+def setup_app(options, put_mappings):
+    # Prevent ES.setup_mappings running on bootstrap;
+    # Restore ES._mappings_setup after bootstrap is over
+    log = get_logger()
+    mappings_setup = getattr(ES, '_mappings_setup', False)
 
-    bootstrap = (bootstrap,)
-    stdout = sys.stdout
-    usage = '%prog config_uri <models'
+    try:
+        ES._mappings_setup = True
+        env = bootstrap(options.config)
+    finally:
+        ES._mappings_setup = mappings_setup
+    registry = env['registry']
+    # Include 'nefertari.engine' to setup specific engine
+    config = Configurator(settings=registry.settings)
+    config.include('nefertari.engine')
+    ES.setup(dictset(registry.settings))
+    if put_mappings:
+        log.setLevel(logging.INFO)
+    ES.setup_mappings()
 
-    def __init__(self, argv, log):
-        parser = ArgumentParser(description=__doc__)
-
-        parser.add_argument(
-            '-c', '--config', help='config.ini (required)',
-            required=True)
-        parser.add_argument(
-            '--quiet', help='Quiet mode', action='store_true',
-            default=False)
-        parser.add_argument(
-            '--params', help='Url-encoded params for each model')
-        parser.add_argument('--index', help='Index name', default=None)
-        parser.add_argument(
-            '--chunk',
-            help=('Index chunk size. If chunk size not provided '
-                  '`elasticsearch.chunk_size` setting is used'),
-            type=int)
-
-        group = parser.add_mutually_exclusive_group(required=True)
-        group.add_argument(
-            '--models',
-            help=('Comma-separated list of model names to index'))
-        group.add_argument(
-            '--recreate',
-            help='Recreate index and reindex all documents',
-            action='store_true',
-            default=False)
-
-        self.options = parser.parse_args()
-        if not self.options.config:
-            return parser.print_help()
-
-        # Prevent ES.setup_mappings running on bootstrap;
-        # Restore ES._mappings_setup after bootstrap is over
-        mappings_setup = getattr(ES, '_mappings_setup', False)
-        try:
-            ES._mappings_setup = True
-            env = self.bootstrap[0](self.options.config)
-        finally:
-            ES._mappings_setup = mappings_setup
-
-        registry = env['registry']
-        # Include 'nefertari.engine' to setup specific engine
-        config = Configurator(settings=registry.settings)
-        config.include('nefertari.engine')
-
-        self.log = log
-
-        if not self.options.quiet:
-            self.log.setLevel(logging.INFO)
-
-        self.settings = dictset(registry.settings)
-
-    def index_models(self, model_names):
-        self.log.info('Indexing models documents')
-        params = self.options.params or ''
-        params = dict([[k, v[0]] for k, v in urllib.parse.parse_qs(params).items()])
-
-        for model_name in model_names:
-            self.log.info('Processing model `{}`'.format(model_name))
-            model = engine.get_document_cls(model_name)
-
-            local_params = dict()
-            local_params.update(params)
-
-            if '_limit' not in local_params:
-                limit = model.get_collection().count()
-                local_params['_limit'] = limit
-
-            chunk_size = int(self.options.chunk or local_params['_limit'])
-
-            es = ES(source=model_name, index_name=self.options.index,
-                    chunk_size=chunk_size)
-
-            query_set = model.get_collection(**local_params)
-            documents = to_indexable_dicts(query_set)
-            self.log.info('Indexing missing `{}` documents'.format(
-                model_name))
-            es.index_missing_documents(documents)
+    return registry
 
 
-    def recreate_index(self):
-        self.log.info('Deleting index')
-        ES.delete_index()
-        self.log.info('Creating index')
-        ES.create_index()
-        self.log.info('Creating mappings')
-        ES.setup_mappings()
+def recreate_index(registry):
+    log = get_logger()
+    settings = dictset(registry.settings)
+    log.info('Deleting index')
+    ES.delete_index()
+    log.info('Creating index')
+    create_index_with_settings(settings)
+    log.info('Creating mappings')
+    ES.setup_mappings()
+
+
+class TaskProducer(Process):
+
+    def __init__(self, *args, **kwargs):
+        self.model_names = kwargs.pop('model_names')
+        self.consumers_count = kwargs.pop('consumers_count')
+        self.options = kwargs.pop('options')
+        self.manager = kwargs.pop('manager')
+        super().__init__(*args, **kwargs)
 
     def run(self):
-        ES.setup(self.settings)
-        if self.options.recreate:
-            self.recreate_index()
-            models = engine.get_document_classes()
-            model_names = [
-                name for name, model in models.items()
-                if getattr(model, '_index_enabled', False)]
-        else:
-            ES.setup_mappings()
-            model_names = split_strip(self.options.models)
 
-        self.index_models(model_names)
+        self.manager.wait_for_consumers()
+        from sqlalchemy.orm import sessionmaker
+        from pyramid_sqlalchemy import BaseObject
+        from nefertari import engine
+        from nefertari_sqla.documents import SessionHolder
+
+        self.Session = sessionmaker()
+        self.Session.configure(bind=BaseObject.metadata.bind)
+        SessionHolder().set_session_factory(self.Session)
+        session = self.Session()
+
+        for model_name in self.model_names:
+            model = engine.get_document_cls(model_name)
+            limit = model.get_collection().count()
+            table_name = model.__tablename__
+            statement = text('SELECT {} FROM public.{}'.format(model.pk_field(), table_name))
+            query = session.query(model).from_statement(statement)
+            items = list(map(lambda item: getattr(item, model.pk_field()) ,sorted(query.values(model.pk_field()))))
+            chunks = list(TaskProducer.split_collection(limit, self.consumers_count, items))
+
+            for p in range(0, self.consumers_count):
+                if len(chunks) > p:
+                    self.manager.tasks.put((model_name, chunks[p]), block=False)
+
+        self.manager.close_task_queue()
+
+    @staticmethod
+    def split_collection(limit, n, collection):
+        list_size = (math.ceil(limit / n) - 1) or 1
+        iteration = 0
+
+        for i in range(0, limit, list_size):
+            iteration += 1
+
+            if iteration == n:
+                yield collection[i:]
+                break
+
+            yield collection[i: i + list_size]
+
+
+class ProcessManager:
+
+    def __init__(self, processes_count):
+        manager = Manager()
+        self.consumers_count = processes_count
+        self.tasks = ClosedQueueAdapter(manager.Queue())
+        self.results = manager.list()
+        self.consumer_lock = manager.Barrier(processes_count + 1)
+        self.barrier = manager.Barrier(processes_count + 1)
+
+    def close_task_queue(self, *args, **kwrags):
+        while not self.tasks.empty():
+            time.sleep(1)
+
+        self.tasks.close(consumers=range(0, self.consumers_count))
+
+    def wait_for_exit(self):
+        self.barrier.wait()
+
+    def wait_for_consumers(self):
+        self.consumer_lock.wait()
+
+
+class TaskConsumer(Process):
+
+    def __init__(self, *args, **kwargs):
+        self.options = kwargs.pop('options')
+        self.manager = kwargs.pop('manager')
+        self.settings = kwargs.pop('settings')
+        super().__init__(*args, **kwargs)
+
+    def run(self):
+        from pyramid_sqlalchemy import BaseObject
+        from sqlalchemy.orm import sessionmaker
+        from nefertari_sqla.documents import SessionHolder
+        from nefertari.elasticsearch import ES
+
+        log = get_logger()
+        results = []
+        ES.setup(dictset(self.settings))
+
+        self.manager.wait_for_consumers()
+        self.Session = sessionmaker()
+        self.Session.configure(bind=BaseObject.metadata.bind)
+        SessionHolder().set_session_factory(self.Session)
+        session = self.Session()
+
+        while True:
+            try:
+                data = self.manager.tasks.get()
+            except QueueClosedException:
+                break
+
+            model_name, ids = data
+            results.append({model_name: self.index_model(model_name, ids, session)})
+
+            self.manager.tasks.task_done()
+
+            if self.manager.tasks.empty():
+                break
+
+        log.info('indexing finished for process {} at {}'.format(self.pid, str(datetime.now())))
+        self.manager.results.append(results)
+        self.manager.wait_for_exit()
+
+    def index_model(self, model_name, ids, session):
+        from nefertari import engine
+        print('working with model {}'.format(model_name))
+
+        model = engine.get_document_cls(model_name)
+
+        chunk_size = int(self.options.chunk or len(ids))
+
+        es = ES(source=model_name, index_name=self.options.index, chunk_size=chunk_size)
+
+        query_set = session.query(model).filter(getattr(model, model.pk_field()).in_(ids)).all()
+        ids = [getattr(item, item.pk_field()) for item in query_set]
+        documents = to_indexable_dicts(query_set)
+
+        es.index_missing_documents(documents)
+
+        with ES.registry as es_registry:
+            es_registry.bulk_index()
+
+        return ids
+
+
+class ClosedQueueAdapter:
+    QUEUE_CLOSED_MESSAGE = 1
+
+    def __init__(self, queue):
+        self.queue = queue
+        self.closed = False
+
+    def close(self, consumers):
+        for _ in consumers:
+            self.queue.put(self.QUEUE_CLOSED_MESSAGE, block=False)
+
+    def get(self, *args, **kwargs):
+        if not self.closed:
+            message = self.queue.get(*args, **kwargs)
+
+            if message is self.QUEUE_CLOSED_MESSAGE:
+                self.closed = True
+                raise QueueClosedException()
+            return message
+        raise QueueClosedException()
+
+    def put(self, *args, **kwargs):
+        return self.queue.put(*args, **kwargs)
+
+    def empty(self, *args, **kwargs):
+        return self.queue.empty(*args, **kwargs)
+
+    def task_done(self, *args, **kwargs):
+        return self.queue.task_done(*args, **kwargs)
+
+
+class QueueClosedException(Exception):
+    pass
