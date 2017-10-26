@@ -5,7 +5,7 @@ import logging
 from functools import partial
 from collections import defaultdict
 import os
-from datetime import datetime
+import time
 
 
 import elasticsearch
@@ -457,7 +457,7 @@ class ESAction:
 
     def __init__(self, **params):
         self.op_types = defaultdict(list)
-        self.creation_time = datetime.now()
+        self.creation_time = time.time()
 
         for action in params['actions']:
             self.op_types[action['_op_type']].append(ESData(action=action, creation_time=self.creation_time))
