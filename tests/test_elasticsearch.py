@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta
+import time
 
 import six
 import pytest
@@ -21,10 +21,10 @@ class MockEngine(Mock):
 class TestESActionRegistry(object):
 
     def test_get_latest_change(self):
-        now = datetime.now()
-        in_two_hours = now + timedelta(hours=2)
+        now = time.time()
+        later = time.time()
         first_data = ESData(action={'_op_type': 'index', '_type': 'Item','_id': 2}, creation_time=now)
-        second_data = ESData(action={'_op_type': 'index', '_type': 'Item','_id': 2}, creation_time=in_two_hours)
+        second_data = ESData(action={'_op_type': 'index', '_type': 'Item','_id': 2}, creation_time=later)
         gen = ES.registry.get_latest_change([first_data, second_data])
         result = next(gen)
 
@@ -34,20 +34,20 @@ class TestESActionRegistry(object):
             next(gen)
 
     def test_filter_deleted_items_from_index(self):
-        now = datetime.now()
-        in_two_hours = now + timedelta(hours=2)
+        now = time.time()
+        later = time.time()
         first_data = ESData(action={'_op_type': 'index', '_type': 'Item','_id': 2}, creation_time=now)
-        second_data = ESData(action={'_op_type': 'delete', '_type': 'Item','_id': 2}, creation_time=in_two_hours)
+        second_data = ESData(action={'_op_type': 'delete', '_type': 'Item','_id': 2}, creation_time=later)
         result = ES.registry.prepare_for_deletion([first_data, second_data])
 
         assert len(result) == 1
         assert result[0] == second_data
 
     def test_filter_deleted_items_from_index_without_deleted(self):
-        now = datetime.now()
-        in_two_hours = now + timedelta(hours=2)
+        now = time.time()
+        later = time.time()
         first_data = ESData(action={'_op_type': 'index', '_type': 'Item','_id': 2}, creation_time=now)
-        second_data = ESData(action={'_op_type': 'index', '_type': 'Item','_id': 2}, creation_time=in_two_hours)
+        second_data = ESData(action={'_op_type': 'index', '_type': 'Item','_id': 2}, creation_time=later)
         result = ES.registry.prepare_for_deletion([first_data, second_data])
 
         assert len(result) == 2
@@ -58,10 +58,10 @@ class TestESActionRegistry(object):
             expected.remove(item)
 
     def test_filter_deleted_items_from_index_without_index(self):
-        now = datetime.now()
-        in_two_hours = now + timedelta(hours=2)
+        now = time.time()
+        later = time.time()
         first_data = ESData(action={'_op_type': 'deleted', '_type': 'Item','_id': 1}, creation_time=now)
-        second_data = ESData(action={'_op_type': 'deleted', '_type': 'Item','_id': 2}, creation_time=in_two_hours)
+        second_data = ESData(action={'_op_type': 'deleted', '_type': 'Item','_id': 2}, creation_time=later)
         result = ES.registry.prepare_for_deletion([first_data, second_data])
 
         assert len(result) == 2

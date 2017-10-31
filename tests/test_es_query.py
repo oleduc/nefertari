@@ -123,7 +123,6 @@ class TestProcessors:
         assert 'should' in result['bool']
         assert 'minimum_should_match' in result['bool']
         assert result['bool']['minimum_should_match'] == 1
-        print(result)
         expected_terms = [{'match': {'_all': 'value'}},
                                 {'match': {'field': {'boost': '10',
                                                      'query': 'value'}}},
@@ -142,7 +141,6 @@ class TestProcessors:
         assert 'should' in result['bool']
         assert 'minimum_should_match' in result['bool']
         assert result['bool']['minimum_should_match'] == 1
-        print(result)
         expected_terms = [{'match_phrase': {'_all': 'value and value'}},
                                 {'match_phrase': {'field': {'boost': '10',
                                                      'query': 'value and value'}}},
@@ -154,7 +152,6 @@ class TestProcessors:
             expected_terms.remove(term)
 
 
-
 class TestESQueryCompilation(object):
 
     def test_build_parse_tokens(self):
@@ -164,7 +161,7 @@ class TestESQueryCompilation(object):
         assert tokens == ['item:value', 'OR', 'item:value']
         query_string = '((item:value OR item:value) AND NOT (item:OR OR item:NOT)) OR true:true'
         tokens = tokenizer.tokenize(query_string)
-        print(tokens)
+
         assert tokens == ['(', '(', 'item:value', 'OR', 'item:value', ')',
                           'AND NOT', '(', 'item:OR', 'OR', 'item:NOT',
                           ')', ')', 'OR', 'true:true']
@@ -447,7 +444,6 @@ class TestESQueryCompilation(object):
         query_string = '(assignments.assignee_id:john   smith) AND (assignments.is_completed:true)'
         params = {'es_q': query_string, '_boost': 'assignments.assignee_id:5,assignments.is_completed:10'}
         result = compile_es_query(params)
-        print(result)
         assert result == {'bool': {'must': [{'bool': {'must': [{'nested': {'query': {'bool': {
             'must': [{'match_phrase': {'assignments_nested.assignee_id': {'query': 'john   smith', 'boost': 5}}},
                      {'term': {'assignments_nested.is_completed': {'value': 'true', 'boost': 10}}}]}},
@@ -511,7 +507,6 @@ class TestESQueryCompilation(object):
         query_string = '(assignments.assignee_id:"qweqweqwe") AND inbox:"testfield"'
         params = {'es_q': query_string}
         result = compile_es_query(params)
-        print(result)
         assert result == {'bool': {'must': [{'bool': {'must': [
             {'nested': {'query': {'bool': {'must': [
                 {'term': {'assignments_nested.assignee_id': 'qweqweqwe'}}]}}, 'path': 'assignments_nested'}},

@@ -4,9 +4,11 @@ import json
 
 import six
 from pyramid.settings import asbool
+from pyramid import httpexceptions as http_exc
+from pyramid.events import ContextFound
+
 from nefertari.utils import drop_reserved_params
 from nefertari.json_httpexceptions import httperrors
-from pyramid import httpexceptions as http_exc
 
 
 log = logging.getLogger(__name__)
@@ -133,9 +135,6 @@ def ssl(handler, registry):
     return ssl
 
 
-from pyramid.events import ContextFound
-
-
 def enable_selfalias(config, id_name):
     """
     This allows replacing id_name with "self".
@@ -162,7 +161,7 @@ def es_tween(handler, registry):
     log.info('ES tween enabled')
     from nefertari.elasticsearch import ES
 
-    def es_tween(request):
+    def _es_tween(request):
         try:
             ES.registry.bind(request)
             response = handler(request)
@@ -175,4 +174,4 @@ def es_tween(handler, registry):
         finally:
             ES.registry.clean()
         return response
-    return es_tween
+    return _es_tween
