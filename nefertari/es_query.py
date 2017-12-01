@@ -286,20 +286,33 @@ class MatchProcessor(BaseProcessor):
 
     @classmethod
     def rule(cls, term):
-        return (' ' in term.value and not RangeProcessor.rule(term)) or\
-               '_all' in term.field or\
-               term.value.lower() != term.value
+        return '_all' in term.field or term.value.lower() != term.value
+
+    @classmethod
+    def next(cls):
+        return MatchPhraseProcessor
+
+    def apply(self, term):
+        term.type = 'match'
+
+
+class MatchPhraseProcessor(BaseProcessor):
+    name = 'match_phrase_processor'
+
+    @classmethod
+    def rule(cls, term):
+        return ' ' in term.value and not RangeProcessor.rule(term)
 
     @classmethod
     def next(cls):
         return WildCardProcessor
 
     def apply(self, term):
-        term.type = 'match'
+        term.type = 'match_phrase'
 
 
 class TypeProcessor(BaseProcessor):
-    query_params = {'match': 'query', 'term': 'value', 'wildcard': 'value'}
+    query_params = {'match': 'query', 'term': 'value', 'wildcard': 'value', 'match_phrase': 'query'}
     name = 'type_processor'
 
     @classmethod
@@ -439,6 +452,7 @@ class TermBuilder:
             RangeProcessor(),
             WildCardProcessor(),
             MatchProcessor(),
+            MatchPhraseProcessor(),
             FinalProcessor(),
             NestedFieldProcessor(),
             BoostProcessor(BoostParams(self.params)),
